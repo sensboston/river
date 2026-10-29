@@ -1,0 +1,22 @@
+/* Self-hosted Saira fonts (SIL Open Font License, see OFL-*.txt), Latin subset */
+@font-face {
+  font-family: 'Saira Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('saira-condensed-600.woff') format('woff');
+}
+@font-face {
+  font-family: 'Saira Condensed';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('saira-condensed-700.woff') format('woff');
+}
+@font-face {
+  font-family: 'Saira';
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url('saira-400.woff') format('woff');
+}

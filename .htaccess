@@ -1,0 +1,9 @@
+# Apache settings for Riverbreaker (ignored by nginx)
+AddType application/manifest+json .webmanifest
+AddType font/woff .woff
+<FilesMatch "^(sw\.js|index\.html|manifest\.webmanifest)$">
+  Header set Cache-Control "no-cache"
+</FilesMatch>
+<FilesMatch "\.(png|svg|ico|woff)$">
+  Header set Cache-Control "public, max-age=604800"
+</FilesMatch>

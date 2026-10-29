@@ -1,0 +1,27 @@
+{
+  "id": "/river/",
+  "name": "Riverbreaker",
+  "short_name": "Riverbreaker",
+  "description": "Arcade river shooter. Fly upstream, shoot enemies, refuel and break every bridge. Works offline.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#060a11",
+  "theme_color": "#060a11",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "screenshots": [
+    { "src": "screenshots/phone-play.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Fly upstream and shoot" },
+    { "src": "screenshots/phone-title.png", "sizes": "780x1688", "type": "image/png", "form_factor": "narrow", "label": "Title screen" },
+    { "src": "screenshots/desktop-play.png", "sizes": "1280x720", "type": "image/png", "form_factor": "wide", "label": "Play on desktop" }
+  ]
+}
