@@ -2,7 +2,7 @@
 
 Arcade river shooter, installable as a PWA and playable offline: fly upstream,
 break every bridge, then take command of a patrol boat. Live at
-(https://sensboston.github.io/river/)
+[https://sensboston.github.io/river]
 
 ```
 index.html            the whole game: rendering, audio, input, HUD
