@@ -1,6 +1,6 @@
 // Riverbreaker service worker: precache the whole app, then serve from cache first.
 // Bump VERSION on every release so that old caches are removed.
-const VERSION = 'riverbreaker-v2';
+const VERSION = 'riverbreaker-v4';
 
 const CORE = [
   './',

@@ -47,7 +47,7 @@ Check after deploy
 
 Release a new version
   1. Change files.
-  2. Change VERSION in sw.js (for example riverbreaker-v3).
+  2. Change VERSION in sw.js (for example riverbreaker-v4).
   3. Upload. Players get the new version on the next launch.
 
 Notes
