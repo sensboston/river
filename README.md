@@ -10,8 +10,10 @@ manifest.webmanifest  PWA manifest (icons, screenshots, standalone display)
 sw.js                 service worker: precache, cache-first, versioned caches
 icons/ fonts/ screenshots/ favicon.ico
 tools/                dependency-free check, smoke test and build scripts
+tools/server-check.sh read-only readiness check for the deploy target
 .github/workflows/    CI and the SSH deploy pipeline
 DEPLOY-CI.md          automatic deployment: server setup, secrets, threat model
+DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 ```
 
 ## Controls
@@ -50,5 +52,6 @@ Pushing to `master` runs the checks, builds `dist/`, waits for the approval of t
 restricted SSH key. Pull requests only run the checks and never see secrets.
 
 Full setup, rollback and security notes: **[DEPLOY-CI.md](DEPLOY-CI.md)**.
+Oracle Cloud Ubuntu instance (Always Free / PAYG): **[DEPLOY-ORACLE-UBUNTU.md](DEPLOY-ORACLE-UBUNTU.md)**.
 Server layout, nginx/Apache snippets and manual release steps:
 [README-DEPLOY.txt](README-DEPLOY.txt).

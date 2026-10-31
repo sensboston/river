@@ -16,6 +16,12 @@ the offline cache of every installed copy of the game.
 
 ## 1. One-time setup on the server
 
+> **Oracle Cloud (Ubuntu)?** The instance-specific steps — rsync/rrsync, the deploy
+> user, OCI Security Lists and the host firewall, and the port-22 caveat for
+> GitHub-hosted runners — are spelled out in
+> [DEPLOY-ORACLE-UBUNTU.md](DEPLOY-ORACLE-UBUNTU.md). Follow that file, then come
+> back here for the GitHub part.
+
 Run these on the machine that serves `senssoft.com`. Replace `deploy` with the
 account you want to use and keep the path exactly as configured.
 
@@ -67,7 +73,20 @@ Check it from your machine:
 ssh -i river_deploy -o IdentitiesOnly=yes deploy@senssoft.com 'ls'   # must fail
 ```
 
-### 1.3 Record the host key
+### 1.3 Verify the server with a script
+
+`tools/server-check.sh` is a read-only checker for everything above (user, key
+restrictions, directory rights, sshd settings, firewall, web server):
+
+```bash
+scp tools/server-check.sh ubuntu@senssoft.com:
+ssh ubuntu@senssoft.com 'sudo ./server-check.sh /var/www/html/river'
+```
+
+It prints `ok` / `warn` / `FAIL` lines and exits non-zero while anything is
+unresolved.
+
+### 1.4 Record the host key
 
 The workflow pins the server's host key, so a man-in-the-middle cannot pretend to
 be the server. Save the line you will paste into GitHub:
