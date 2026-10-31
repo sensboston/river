@@ -72,6 +72,14 @@ window.__rb = {
   set revives(v) { revives = v; },
   get diffIndex() { return diffIndex; },
   setDifficulty,
+  get dailyRun() { return dailyRun; },
+  setDaily, dailySeed, dailyLabel, beginOver,
+  get dailyBest() { return dailyBest; },
+  get rows() { return rows; },
+  get progress() { return progress; },
+  get runUpgrades() { return runUpgrades; },
+  get runBest() { return runBest; },
+  get tally() { return tally; },
   get fuel() { return fuel; },
   get weather() { return weather; },
   get P() { return P; },
@@ -611,6 +619,67 @@ for (const mode of ['desktop', 'touch']) {
     api.hitPlayer(999);
     step(130);
     assert.notEqual(api.state, 'entry');
+  });
+
+  check(`[${mode}] the daily seed is the calendar, not the clock`, () => {
+    assert.equal(api.dailySeed(20261031), api.dailySeed(20261031));
+    assert.notEqual(api.dailySeed(20261031), api.dailySeed(20261101));
+    assert.equal(api.dailyLabel(20261031), '31 OCT');
+    assert.equal(api.dailyLabel(20261101), '01 NOV');
+  });
+
+  check(`[${mode}] one daily course for the whole day, different from the usual river`, () => {
+    // Rows 0-39 are the straight opening stretch on every seed: compare further up.
+    const sig = () => { api.ensureRows(220); return api.rows.slice(0, 220).map(r => r.l + ':' + r.r).join(','); };
+    api.setDaily(false);
+    api.newGame();
+    const plain = sig();
+    api.setDaily(true);
+    api.newGame();
+    const day = sig();
+    assert.equal(api.dailyRun, true);
+    assert.notEqual(day, plain, 'the daily course has to differ from the everyday one');
+    api.newGame();
+    assert.equal(sig(), day, 'the same date must rebuild the same course');
+    api.setDaily(false);
+    api.newGame();
+    assert.equal(api.dailyRun, false);
+    assert.equal(sig(), plain, 'switching back restores the everyday river');
+  });
+
+  check(`[${mode}] the last upgrade of a lost run waits for the next one`, () => {
+    api.newGame();
+    api.runUpgrades.length = 0;
+    api.finishDistrict();
+    assert.equal(api.state, 'draft');
+    const id = api.draft.cards[0].id;
+    assert.equal(api.chooseUpgrade(0), true);
+    assert.equal(api.state, 'play');
+    api.score = 0;
+    api.lives = 1;
+    api.revives = 0;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.equal(api.state, 'over');
+    assert.equal(api.progress.vet, id, 'the last upgrade is salvaged');
+    api.newGame();
+    assert.equal(api.progress.vet, '', 'the salvage is spent by the next run');
+    assert.ok(api.runUpgrades.indexOf(id) >= 0, 'the new run starts with it');
+  });
+
+  check(`[${mode}] the report screen counts the score up`, () => {
+    api.newGame();
+    api.score = 4321;
+    api.beginOver(90);
+    step(1);
+    const mid = api.tally.v;
+    assert.ok(mid > 0 && mid < 4321, `the tally should still be running (got ${mid})`);
+    step(90);
+    assert.equal(api.tally.v, 4321);
+    assert.equal(api.state, 'over');
   });
 
   check(`[${mode}] long run with restarts stays stable`, () => {

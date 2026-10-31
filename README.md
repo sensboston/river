@@ -26,6 +26,23 @@ DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 * Soft failure: the first time the last life is lost, the run gets one **second
   wind** instead of ending. Chill and Standard have one, Arcade has none.
 
+## Daily run
+
+* The `DAILY RUN` pill on the title screen (or `D`) switches the run to the river
+  of the day: the course and the upgrade offers are generated from the date, so
+  everyone who plays today flies the same stretches and gets the same three cards.
+  No server and no accounts, the calendar is the seed (`dailySeed`).
+* Every run is rebuildable from a seed: `reseedRiver()` regenerates the cached row
+  layout, so the everyday river and today's river differ only by their seed. The
+  opening 40 rows are deliberately straight on every seed.
+* Today's best score is kept in `localStorage` and shown on the title screen and on
+  the report screen. Daily runs still count for the all-time board.
+* **Salvage**: the last upgrade taken in a lost run is kept and is already fitted
+  when the next run starts (`progress.vet`). A bad run always leaves something.
+
+The report screen counts the final score up, marks a `NEW RECORD`, shows the daily
+best and names the salvaged upgrade.
+
 ## Controls
 
 * Mouse: move to steer, hold the left button to fire, right button or `V` for a rocket.
@@ -88,7 +105,8 @@ objects, drives thousands of frames and asserts the rules that are easy to break
 air and water collision layers, shield energy, refuelling, respawn safety, mines,
 storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
 upgrade draft, star persistence, the initials/hi-score flow, difficulty scaling,
-the tutorial sector and the second wind.
+the tutorial sector, the second wind, the daily seed and course, the salvage on
+death and the score tally (74 checks).
 
 ## Deployment
 

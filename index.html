@@ -654,7 +654,10 @@ const S_VIGNETTE = sprite(W, H, g => {
 
 // River geometry: rows are generated once and cached
 const rows = [];
-const rng = mulberry32(20261028);
+// The course is a pure function of its seed, so a run can be rebuilt later. The
+// fixed seed is the everyday river; the daily run derives its seed from the date.
+const RIVER_SEED = 20261028;
+let rng = mulberry32(RIVER_SEED);
 let gCenter = W / 2, gWidth = 300, tCenter = W / 2, tWidth = 300, nextChange = 40;
 function genRow(r) {
   if (r >= nextChange) {
@@ -670,6 +673,11 @@ function genRow(r) {
   rows.push({ l: Math.round(gCenter - gWidth / 2), r: Math.round(gCenter + gWidth / 2) });
 }
 function ensureRows(r) { while (rows.length <= r) genRow(rows.length); }
+function reseedRiver(seed) {
+  rows.length = 0;
+  gCenter = W / 2; gWidth = 300; tCenter = W / 2; tWidth = 300; nextChange = 40;
+  rng = mulberry32(seed);
+}
 function rowAt(wy) {
   const i = clamp(Math.floor(wy / ROW), 0, rows.length - 1);
   return rows[i];
@@ -692,6 +700,10 @@ let invuln = 0, deathTimer = 0, fireCd = 0, overTimer = 0, lowBeep = 0;
 let spreadT = 0, rapidT = 0;
 let rockets = 0;
 let revives = 1;        // free "second wind" per run, scaled by difficulty
+let runUpgrades = [];   // upgrade ids taken this run, for the salvage on death
+let runBest = 0;        // hi-score at the start of the run: did this one beat it?
+// Score tally on the report screen: the number counts up instead of appearing.
+const tally = { v: 0, target: 0 };
 // Shield state: energy in [0, SHIELD_MAX], short cooldown after an absorbed hit,
 // and a ripple counter used by the dome animation.
 let shieldEnergy = 0, shieldHitCd = 0, shieldRipple = 0;
@@ -728,12 +740,13 @@ function buzz(ms) { try { if (touchUsed && navigator.vibrate) navigator.vibrate(
 // and then hands out a choice of upgrades. Stars are kept between sessions, so a
 // run always leaves something behind even when it ends badly.
 const SAVE_KEY = 'riverbreakerProgress';
-const progress = { best: {}, stars: 0 };
+const progress = { best: {}, stars: 0, vet: '' };
 function loadProgress() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return;
     const o = JSON.parse(raw);
+    if (o && typeof o === 'object' && typeof o.vet === 'string') progress.vet = o.vet;
     if (o && typeof o === 'object' && o.best) {
       for (const k in o.best) {
         const v = Math.max(0, Math.min(3, Number(o.best[k]) || 0));
@@ -745,7 +758,9 @@ function loadProgress() {
 function totalStars() { let n = 0; for (const k in progress.best) n += progress.best[k] || 0; return n; }
 function saveProgress() {
   progress.stars = totalStars();
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: progress.best, stars: progress.stars })); } catch (e) {}
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ best: progress.best, stars: progress.stars, vet: progress.vet }));
+  } catch (e) {}
 }
 loadProgress();
 
@@ -780,6 +795,60 @@ function setDifficulty(i) {
   diffIndex = n;
   try { localStorage.setItem(DIFF_KEY, String(diffIndex)); } catch (e) {}
   sfx('hit');
+}
+
+// --- Daily run ------------------------------------------------------------
+// One river per day. The course and the upgrade offers are generated from the
+// date, so everybody who plays today flies the same stretches in the same order.
+// No server and no accounts: the calendar is the seed.
+const DAILY_KEY = 'riverbreakerDaily';
+let dailyRun = false;
+let dailyBest = 0;
+let drng = null;              // seeded stream for daily upgrade offers
+function drand() { return drng ? drng() : Math.random(); }
+function dayStamp(d) {
+  const x = d instanceof Date ? d : new Date();
+  return x.getFullYear() * 10000 + (x.getMonth() + 1) * 100 + x.getDate();
+}
+const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+// "31 OCT" rather than 31.10 or 10/31: no locale can misread a month name.
+function dailyLabel(stamp) {
+  const s = stamp || dayStamp();
+  const mo = Math.min(12, Math.max(1, Math.floor(s / 100) % 100));
+  return String(s % 100 || 1).padStart(2, '0') + ' ' + MONTHS[mo - 1];
+}
+// FNV-style mix: two neighbouring dates must not share a course.
+function dailySeed(stamp) {
+  const s = stamp || dayStamp();
+  let h = Math.imul(2166136261 ^ (s >>> 0), 16777619) >>> 0;
+  h = Math.imul(h ^ (s >>> 7), 16777619) >>> 0;
+  return (h ^ (h >>> 15)) >>> 0;
+}
+(function loadDaily() {
+  try {
+    const o = JSON.parse(localStorage.getItem(DAILY_KEY) || 'null');
+    if (o && typeof o === 'object' && o.d === dayStamp() && typeof o.s === 'number') {
+      dailyBest = Math.max(0, Math.round(o.s));
+    }
+  } catch (e) {}
+})();
+function saveDaily(n) {
+  if (n > dailyBest) dailyBest = Math.round(n);
+  try { localStorage.setItem(DAILY_KEY, JSON.stringify({ d: dayStamp(), s: dailyBest })); } catch (e) {}
+}
+function setDaily(on) {
+  const next = !!on;
+  if (next === dailyRun) return false;
+  dailyRun = next;
+  // The backdrop is rebuilt only while nothing is in flight, so a live run is
+  // never reshuffled under the player.
+  if (state === 'title') {
+    reseedRiver(dailyRun ? dailySeed() : RIVER_SEED);
+    cam = 0; ents = []; weather = []; spawnedUpTo = 40; spawnBlock = 0;
+    ensureRows(60);
+  }
+  sfx('hit');
+  return true;
 }
 
 // --- Arcade hi-score table -------------------------------------------------
@@ -839,8 +908,7 @@ function confirmEntry() {
   scoreTable.sort((a, b) => b.s - a.s);
   scoreTable = scoreTable.slice(0, 5);
   saveScores();
-  state = 'over';
-  overTimer = 45;
+  beginOver(45);
   sfx('pickup');
   return true;
 }
@@ -897,7 +965,7 @@ function scoreK() { return Math.pow(1.25, perks.score); }
 function pickUpgrades(n) {
   const pool = UPGRADES.slice();
   for (let i = pool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(drand() * (i + 1));
     const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
   }
   return pool.slice(0, n);
@@ -910,6 +978,7 @@ function applyUpgrade(u) {
   else if (u.id === 'fuel') perks.fuel++;
   else if (u.id === 'hull') lives = Math.min(MAX_LIVES + 2, lives + 1);
   else if (u.id === 'score') perks.score++;
+  runUpgrades.push(u.id);
   sfx('pickup');
 }
 // End of a district: stars, then the upgrade draft. This is also the only, and
@@ -1344,6 +1413,13 @@ function addScore(n, useCombo) {
 }
 function saveHi() { try { localStorage.setItem('riverbreakerHi', String(hi)); } catch (e) {} }
 function showBanner(s, sub, dur) { banner.s = s; banner.sub = sub; banner.t = dur; banner.max = dur; }
+function beginOver(delay) {
+  banner.t = 0;              // no stale sector banner over the report
+  tally.v = 0;
+  tally.target = Math.max(0, Math.round(score));
+  state = 'over';
+  overTimer = delay || 90;
+}
 
 function resetPlayerFx() {
   spreadT = 0; rapidT = 0; combo = 0; comboT = 0;
@@ -1352,6 +1428,12 @@ function resetPlayerFx() {
 }
 
 function newGame() {
+  // Rebuild the course from its seed: the everyday river, or today's river.
+  reseedRiver(dailyRun ? dailySeed() : RIVER_SEED);
+  drng = dailyRun ? mulberry32(dailySeed() ^ 0x5f3759df) : null;
+  runBest = hi;
+  runUpgrades = [];
+  tally.v = 0; tally.target = 0;
   score = 0; lives = diff().lives; revives = diff().revives; fuel = 100; nextExtra = EXTRA_LIFE_EVERY;
   rockets = 0; rocketMax = MAX_ROCKETS;
   perks.fire = 0; perks.fuel = 0; perks.score = 0;
@@ -1368,7 +1450,11 @@ function newGame() {
   invuln = 90; fireCd = 0;
   state = 'play';
   startEngine();
-  showBanner('SECTOR 1 · AIR PATROL', 'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal, 150);
+  // A salvaged upgrade from the last run is already bolted on.
+  const salv = progress.vet ? UPGRADES.find(u => u.id === progress.vet) : null;
+  if (salv) { applyUpgrade(salv); progress.vet = ''; saveProgress(); }
+  showBanner('SECTOR 1 · AIR PATROL',
+    'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal + (salv ? ' · KEPT: ' + salv.name : ''), 150);
 }
 
 function respawn() {
@@ -1859,14 +1945,21 @@ function update() {
         } else {
           lives = 0;
           saveHi();
+          // Salvage: the last upgrade of the run is waiting at the start of the
+          // next one, so even a bad run leaves something behind.
+          if (runUpgrades.length) { progress.vet = runUpgrades[runUpgrades.length - 1]; saveProgress(); }
+          if (dailyRun) saveDaily(score);
           if (qualifiesForTable(score)) startEntry();
-          else { state = 'over'; overTimer = 90; }
+          else beginOver(90);
         }
       }
       else respawn();
     }
   } else if (state === 'over') {
     if (overTimer > 0) overTimer--;
+    if (tally.v < tally.target) {
+      tally.v = Math.min(tally.target, tally.v + Math.max(1, (tally.target - tally.v) * 0.18));
+    }
   }
   updateParts();
   updatePops();
@@ -2581,7 +2674,8 @@ function drawHud() {
   txt(String(score).padStart(7, '0'), 18, 58, F_NUM, '#ffffff', 'left', 'rgba(0,0,0,0.6)');
   txt('BEST ' + String(hi).padStart(7, '0'), 18, 76, F_LBL, 'rgba(232,238,246,0.65)');
   if (state !== 'title') {
-    txt('SECTOR ' + sectorNo(), W / 2, 26, F_LBL, 'rgba(232,238,246,0.8)', 'center');
+    txt('SECTOR ' + sectorNo() + (dailyRun ? ' \u00b7 DAILY' : ''), W / 2, 26, F_LBL,
+      dailyRun ? '#8feaff' : 'rgba(232,238,246,0.8)', 'center');
     txt(sectorLabel(), W / 2, 43, '600 11px "Saira Condensed", sans-serif', isBoatMode() ? '#8feaff' : '#ffd37a', 'center');
     // Objective strip: what this district wants and how far you are.
     if (mission.id) {
@@ -2767,6 +2861,12 @@ function diffHit(x, y) {
   }
   return -1;
 }
+const DAILY_Y = 576, DAILY_W = 268, DAILY_H = 32;
+function dailyPill() { return { x: (W - DAILY_W) / 2, y: DAILY_Y, w: DAILY_W, h: DAILY_H }; }
+function dailyHit(x, y) {
+  const yy = y - (H - 720) / 2, p = dailyPill();
+  return x >= p.x && x <= p.x + p.w && yy >= p.y && yy <= p.y + p.h;
+}
 
 function drawTitle() {
   const blink = t % 70 < 48;
@@ -2802,11 +2902,26 @@ function drawTitle() {
     rr(p.x, p.y, p.w, p.h, 8); ctx.stroke();
     txt(p.d.name, p.x + p.w / 2, p.y + 22, '700 14px "Saira Condensed", sans-serif', on ? '#ffd37a' : 'rgba(232,238,246,0.55)', 'center');
   }
-  txt(diff().brief, W / 2, 568, '400 11px "Saira", sans-serif', 'rgba(232,238,246,0.5)', 'center');
-  if (blink) txt('PRESS ENTER OR TAP TO START', W / 2, 602, '700 22px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(255,255,255,0.35)');
-  txt('Protect homes (-150); dodge rockets; mines sink boats, storms fry jets', W / 2, 632, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
-  txt('Shields raise on pickup, drain with every hit and fade with time', W / 2, 652, '400 12px "Saira", sans-serif', 'rgba(150,255,208,0.7)', 'center');
-  txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, P pause', W / 2, 672, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
+  txt(diff().brief, W / 2, 566, '400 11px "Saira", sans-serif', 'rgba(232,238,246,0.5)', 'center');
+  // Daily run: same river, same missions, same upgrade offers for everybody today.
+  const dp = dailyPill();
+  ctx.fillStyle = dailyRun ? 'rgba(120,220,255,0.15)' : 'rgba(8,14,24,0.62)';
+  rr(dp.x, dp.y, dp.w, dp.h, 9); ctx.fill();
+  ctx.strokeStyle = dailyRun ? '#8feaff' : 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = dailyRun ? 1.8 : 1;
+  rr(dp.x, dp.y, dp.w, dp.h, 9); ctx.stroke();
+  txt(dailyRun ? 'DAILY RUN \u00b7 ' + dailyLabel() + ' \u00b7 ON' : 'DAILY RUN \u00b7 OFF',
+    dp.x + dp.w / 2, dp.y + 21, '700 13px "Saira Condensed", sans-serif',
+    dailyRun ? '#bfefff' : 'rgba(232,238,246,0.55)', 'center');
+  txt(dailyRun
+    ? (dailyBest > 0 ? 'TODAY\u2019S BEST ' + String(dailyBest).padStart(7, '0') + ' \u00b7 same river for everyone'
+      : 'Same river and same upgrades for everyone today')
+    : 'Tap DAILY for the shared course of the day (D)',
+    W / 2, 622, '400 11px "Saira", sans-serif', 'rgba(232,238,246,0.45)', 'center');
+  if (blink) txt('PRESS ENTER OR TAP TO START', W / 2, 648, '700 22px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(255,255,255,0.35)');
+  txt('Protect homes (-150); dodge rockets; mines sink boats, storms fry jets', W / 2, 668, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
+  txt('Shields raise on pickup, drain with every hit and fade with time', W / 2, 686, '400 12px "Saira", sans-serif', 'rgba(150,255,208,0.7)', 'center');
+  txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, P pause', W / 2, 704, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
   ctx.restore();
 }
 
@@ -2960,12 +3075,32 @@ function render() {
   if (state === 'draft') { drawDraft(); return; }
   const blink = t % 70 < 48;
   if (state === 'over') {
-    panel([
+    const shown = tally.v >= tally.target ? tally.target : Math.round(tally.v);
+    const lines = [
       { s: 'GAME OVER', y: 270, f: '700 64px "Saira Condensed", sans-serif', c: '#ff6a5e', g: 'rgba(255,60,40,0.5)' },
-      { s: 'SCORE ' + String(score).padStart(7, '0'), y: 320, f: '600 26px "Saira Condensed", sans-serif', c: '#ffffff' },
-      { s: 'BEST ' + String(hi).padStart(7, '0'), y: 350, f: '600 18px "Saira Condensed", sans-serif', c: 'rgba(232,238,246,0.7)' },
-      { s: overTimer <= 0 && blink ? 'PRESS ENTER OR TAP' : '', y: 420, f: '700 22px "Saira Condensed", sans-serif', c: '#ffffff' }
-    ]);
+      { s: 'SCORE ' + String(shown).padStart(7, '0'), y: 320, f: '600 26px "Saira Condensed", sans-serif', c: '#ffffff' },
+      { s: 'BEST ' + String(hi).padStart(7, '0'), y: 350, f: '600 18px "Saira Condensed", sans-serif', c: 'rgba(232,238,246,0.7)' }
+    ];
+    let y = 372;
+    const F_LINE = '600 12px "Saira Condensed", sans-serif';
+    if (score > runBest && score > 0) {
+      lines.push({ s: 'NEW RECORD', y, f: '700 15px "Saira Condensed", sans-serif', c: '#ffd37a', g: 'rgba(255,170,40,0.55)' });
+      y += 22;
+    }
+    if (dailyRun) {
+      lines.push({ s: 'DAILY ' + dailyLabel() + ' \u00b7 BEST ' + String(dailyBest).padStart(7, '0'), y, f: F_LINE, c: '#8feaff' });
+      y += 20;
+    }
+    const vet = UPGRADES.find(u => u.id === progress.vet);
+    if (vet) {
+      lines.push({ s: '+' + vet.name + ' KEPT FOR THE NEXT RUN', y, f: F_LINE, c: vet.c });
+      y += 20;
+    }
+    lines.push({
+      s: overTimer <= 0 && blink ? 'PRESS ENTER OR TAP' : '',
+      y: Math.max(424, y + 24), f: '700 22px "Saira Condensed", sans-serif', c: '#ffffff'
+    });
+    panel(lines);
   } else if (state === 'paused') {
     panel([
       { s: 'PAUSED', y: 340, f: '700 56px "Saira Condensed", sans-serif', c: '#ffb02e' },
@@ -2992,6 +3127,11 @@ window.addEventListener('keydown', e => {
   audio(); keepAwake();
   if (state === 'title' && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
     setDifficulty(diffIndex + (e.code === 'ArrowLeft' ? -1 : 1));
+    e.preventDefault();
+    return;
+  }
+  if (state === 'title' && e.code === 'KeyD') {
+    setDaily(!dailyRun);
     e.preventDefault();
     return;
   }
@@ -3063,6 +3203,7 @@ cv.addEventListener('pointerdown', e => {
   if (state === 'title') {
     const di = diffHit(p.x, p.y);
     if (di >= 0) { setDifficulty(di); return; }
+    if (dailyHit(p.x, p.y)) { setDaily(!dailyRun); return; }
   }
   tryStart();
   try { cv.setPointerCapture(e.pointerId); } catch (err) {}
