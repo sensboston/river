@@ -1,0 +1,11 @@
+version: 2
+# Keeps the SHA-pinned official actions up to date without ever running an
+# unpinned tag. Dependabot opens a PR; CI verifies it; a human merges it.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci

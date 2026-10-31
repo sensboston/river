@@ -1,0 +1,193 @@
+name: Deploy
+
+# Only a push to master (or a manual run) can deploy. Pull requests never reach
+# this workflow, so a PR author cannot get anywhere near the deploy key even if
+# the workflow file is edited in the PR.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to deploy (branch, tag or commit SHA). Use an old SHA to roll back.'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+# Never run two deploys at the same time; a queued deploy waits instead of cancelling.
+concurrency:
+  group: deploy-river
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Static checks
+        run: node tools/check.mjs
+
+      - name: Headless gameplay smoke test
+        run: node tools/smoke.mjs
+
+      - name: Build the deployable PWA
+        run: node tools/build.mjs
+
+      - name: Upload the built PWA (audit copy, also usable for a manual rollback)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: river-pwa-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+
+  deploy:
+    name: Deploy over SSH
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The "production" environment adds a manual approval gate and a branch rule.
+    # Set both up once in Settings -> Environments (see DEPLOY-CI.md).
+    # A fork that inherits these variables must not deploy to the real server.
+    if: github.repository == 'sensboston/river'
+    environment:
+      name: production
+      url: ${{ vars.DEPLOY_URL || 'https://senssoft.com/river/' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Build the deployable PWA
+        run: node tools/build.mjs
+
+      # Cheap guard rails: a typo in a repository variable must never turn into
+      # "rsync --delete" against the wrong directory.
+      - name: Validate deploy target
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          [ -n "${DEPLOY_HOST:-}" ] || fail "repository variable DEPLOY_HOST is not set"
+          [ -n "${DEPLOY_USER:-}" ] || fail "repository variable DEPLOY_USER is not set"
+          [ -n "${DEPLOY_PATH:-}" ] || fail "repository variable DEPLOY_PATH is not set"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || fail "DEPLOY_HOST has unexpected characters"
+          [[ "$DEPLOY_USER" =~ ^[A-Za-z0-9._-]+$ ]] || fail "DEPLOY_USER has unexpected characters"
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+/river/$ ]] \
+            || fail "DEPLOY_PATH must be an absolute path ending in /river/ (got: $DEPLOY_PATH)"
+          echo "Target: $DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH"
+
+      - name: Deploy with rsync over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          key="$(mktemp)"; known="$(mktemp)"
+          trap 'rm -f "$key" "$known"' EXIT
+
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key"
+          [ -s "$key" ] || { echo "::error::secret DEPLOY_SSH_KEY is empty"; exit 1; }
+          grep -q 'BEGIN .*PRIVATE KEY' "$key" \
+            || { echo "::error::DEPLOY_SSH_KEY does not look like an OpenSSH private key"; exit 1; }
+          ssh-keygen -l -f "$key" >/dev/null
+
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$known"
+          [ -s "$known" ] || { echo "::error::variable DEPLOY_KNOWN_HOSTS is empty"; exit 1; }
+          grep -qE "(^|[ ,])${DEPLOY_HOST//./\\.}([ ,]|$)" "$known" \
+            || { echo "::error::DEPLOY_KNOWN_HOSTS has no entry for $DEPLOY_HOST"; exit 1; }
+
+          # Host key is pinned (StrictHostKeyChecking=yes + our own known_hosts),
+          # so a man-in-the-middle cannot impersonate the server.
+          ssh_opts=(-i "$key" -o IdentitiesOnly=yes -o BatchMode=yes
+                    -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$known"
+                    -o ConnectTimeout=20 -o ServerAliveInterval=15)
+          # No owner/group sync (the deploy user may not own the files),
+          # delayed updates so no visitor ever gets a half-written file.
+          rsync_opts=(-rlptz --checksum --delete --delay-updates --omit-dir-times
+                      --no-owner --no-group --chmod=D755,F644)
+
+          echo "::group::Dry run"
+          rsync "${rsync_opts[@]}" --dry-run --itemize-changes \
+            -e "ssh ${ssh_opts[*]}" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH" | sed -n '1,100p'
+          echo "::endgroup::"
+
+          echo "::group::Upload"
+          rsync "${rsync_opts[@]}" --itemize-changes \
+            -e "ssh ${ssh_opts[*]}" dist/ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH"
+          echo "::endgroup::"
+
+      - name: Verify the live site
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL || 'https://senssoft.com/river/' }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./dist/version.json').version")"
+          url="${DEPLOY_URL%/}/"
+
+          ok=0
+          for _ in $(seq 1 12); do
+            if curl -fsS --max-time 15 "${url}" | grep -q '<title>Riverbreaker'; then ok=1; break; fi
+            sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::${url} is not serving the game"; exit 1; }
+
+          ok=0
+          for _ in $(seq 1 12); do
+            if curl -fsS --max-time 15 "${url}sw.js" | grep -q "$version"; then ok=1; break; fi
+            sleep 5
+          done
+          [ "$ok" = 1 ] || { echo "::error::sw.js does not report $version yet"; exit 1; }
+
+          ct="$(curl -fsSI --max-time 15 "${url}manifest.webmanifest" | tr -d '\r' \
+                | awk -F': ' 'tolower($1)=="content-type"{print $2}')"
+          echo "manifest content-type: ${ct:-<missing>}"
+          case "$ct" in
+            application/manifest+json*) ;;
+            '') echo "::warning::no Content-Type for manifest.webmanifest" ;;
+            *) echo "::warning::manifest is served as '$ct'; check the nginx/Apache MIME mapping" ;;
+          esac
+
+          {
+            echo "### Deployed \`$version\`"
+            echo ""
+            echo "- site: $url"
+            echo "- commit: $GITHUB_SHA"
+          } >> "$GITHUB_STEP_SUMMARY"

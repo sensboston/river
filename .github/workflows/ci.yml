@@ -1,0 +1,58 @@
+name: CI
+
+# Runs on every pull request and on every branch except master.
+# No secrets are used here, so code from a pull request can never read them.
+on:
+  pull_request:
+  push:
+    branches-ignore: [master]
+  workflow_dispatch:
+
+# Read-only token: this job never writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Checks, smoke test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Pinned to a commit SHA instead of a tag: a moved or hijacked tag cannot
+      # change the code that runs here. Comments track the release for Dependabot.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Static checks (HTML, manifest, service worker, assets)
+        run: node tools/check.mjs
+
+      - name: Headless gameplay smoke test
+        run: node tools/smoke.mjs
+
+      - name: Build the deployable PWA
+        run: node tools/build.mjs
+
+      - name: Upload the built PWA
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: river-pwa-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          include-hidden-files: true   # .htaccess must be part of the artifact
+          retention-days: 14

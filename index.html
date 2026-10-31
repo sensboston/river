@@ -115,8 +115,8 @@ canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
   <div class="view" id="view">
     <canvas id="game" tabindex="0" aria-label="Riverbreaker game"></canvas>
   </div>
-  <p class="hint hint-key"><kbd>Mouse</kbd> move and hold left button to fire; <kbd>V</kbd> rocket, <kbd>C</kbd> field. Or <kbd>Arrows</kbd>/<kbd>WASD</kbd>, <kbd>Space</kbd> fire - <kbd>P</kbd> pause - <kbd>M</kbd> sound</p>
-  <p class="hint hint-touch">Drag to steer and adjust speed. Hold FIRE to shoot; tap ROCKET or FIELD to use a stored charge.</p>
+  <p class="hint hint-key"><kbd>Mouse</kbd> move and hold left button to fire; <kbd>V</kbd> rocket. Or <kbd>Arrows</kbd>/<kbd>WASD</kbd>, <kbd>Space</kbd> fire - <kbd>P</kbd> pause - <kbd>M</kbd> sound. Shields raise by themselves.</p>
+  <p class="hint hint-touch">Drag to steer and adjust speed. Hold FIRE to shoot; tap ROCKET to launch. Shields raise by themselves when you grab one.</p>
   <p class="hint" id="iosHint" hidden>To install on iPhone: tap Share, then Add to Home Screen.</p>
 </div>
 
@@ -133,9 +133,15 @@ const BRIDGE_EVERY = 700;     // rows between bridges
 const MAX_LIVES = 4;
 const EXTRA_LIFE_EVERY = 50000;
 const MAX_ROCKETS = 5;
-const MAX_SHIELD_CHARGES = 3;
-const SHIELD_DURATION = 480;  // eight seconds at 60 fps
-const SINK_DURATION = 150;    // two and a half seconds
+// The shield is an energy pool, not a stored charge: it raises itself the moment
+// a shield pod is picked up, bleeds away with time and loses energy on every hit.
+const SHIELD_MAX = 100;
+const SHIELD_PICKUP = 55;      // energy added by one shield pod
+const SHIELD_DRAIN = 0.22;     // energy lost per frame while the dome is up (~7.5 s full)
+const SHIELD_BULLET_COST = 16; // enemy bullet absorbed by the dome
+const SHIELD_ROCKET_COST = 28; // enemy rocket absorbed by the dome
+const SHIELD_CRASH_COST = 32;  // ramming an enemy or a bank
+const SINK_DURATION = 150;     // two and a half seconds
 const FUEL_EVERY = 160;       // between the strict original and the easy prototype
 const STEP = 1000 / 60;       // fixed update step in ms
 let PLAYER_SY = H - PLAYER_OFFSET;
@@ -408,21 +414,61 @@ const S_LAUNCHER = sprite(54, 44, g => {
   g.fillStyle = '#e3cf8b'; g.fillRect(7, 30, 5, 3); g.fillRect(42, 30, 5, 3);
 });
 
-// Fuel barge (top view, 46x100)
-const S_BARGE = sprite(46, 100, g => {
-  g.fillStyle = lin(g, 6, 0, 40, 0, [[0, '#262d38'], [0.5, '#4d596a'], [1, '#262d38']]);
-  rrIn(g, 5, 2, 36, 96, 9); g.fill();
-  g.strokeStyle = '#6a778b'; g.lineWidth = 1.2; g.stroke();
-  for (let i = 0; i < 3; i++) {
-    const y = 9 + i * 29;
-    g.fillStyle = lin(g, 9, 0, 37, 0, [[0, '#9aa5b5'], [0.35, '#f4f6f9'], [0.7, '#c4ccd8'], [1, '#8a95a6']]);
-    rrIn(g, 9, y, 28, 25, 10); g.fill();
-    g.fillStyle = 'rgba(214,50,46,0.9)'; g.fillRect(9, y + 10, 28, 5);
-    g.fillStyle = '#fff';
-    g.beginPath(); g.moveTo(23, y + 5); g.quadraticCurveTo(27, y + 10, 23, y + 12); g.quadraticCurveTo(19, y + 10, 23, y + 5); g.fill();
+// Fuel barge (top view, 56x104): an amber river tanker with a pump house,
+// hazard chevrons and a blinking beacon, so it reads as a fuel stop at a glance.
+const S_BARGE = sprite(56, 104, g => {
+  // Hull and rub rail
+  g.fillStyle = lin(g, 4, 0, 52, 0, [[0, '#0b131b'], [0.42, '#2b3a48'], [1, '#0a1118']]);
+  rrIn(g, 6, 3, 44, 98, 13); g.fill();
+  g.strokeStyle = '#6a8095'; g.lineWidth = 1.4; g.stroke();
+  g.strokeStyle = 'rgba(150,180,205,0.28)'; g.lineWidth = 1;
+  rrIn(g, 9, 6, 38, 92, 11); g.stroke();
+
+  // Deck
+  g.fillStyle = '#16212c'; rrIn(g, 12, 9, 32, 86, 8); g.fill();
+
+  // Two amber fuel tanks
+  for (let i = 0; i < 2; i++) {
+    const y = 13 + i * 32;
+    g.fillStyle = lin(g, 15, 0, 41, 0, [[0, '#7a4a10'], [0.32, '#ffc24a'], [0.58, '#ffe6a6'], [1, '#6d4008']]);
+    rrIn(g, 15, y, 26, 27, 8); g.fill();
+    g.strokeStyle = 'rgba(66,40,7,0.5)'; g.lineWidth = 1;
+    for (const yy of [y + 6, y + 13.5, y + 21]) { g.beginPath(); g.moveTo(16, yy); g.lineTo(40, yy); g.stroke(); }
+    // hatch
+    g.fillStyle = '#3b2a10'; g.beginPath(); g.arc(28, y + 13.5, 4.2, 0, 7); g.fill();
+    g.fillStyle = '#ffd97a'; g.beginPath(); g.arc(28, y + 13.5, 2, 0, 7); g.fill();
+    // hazard chevrons along the tank shoulders
+    g.fillStyle = 'rgba(18,18,22,0.82)';
+    g.fillRect(15, y + 30, 26, 0.9);
   }
-  g.fillStyle = '#ffd34d'; g.fillRect(7, 5, 2, 2); g.fillRect(37, 5, 2, 2); g.fillRect(7, 93, 2, 2); g.fillRect(37, 93, 2, 2);
+
+  // Hazard chevrons on the deck strip
+  g.fillStyle = '#1c1a17'; g.fillRect(12, 76, 32, 7);
+  for (let x = -8; x < 34; x += 8) {
+    g.fillStyle = '#ffcb45';
+    g.beginPath();
+    g.moveTo(12 + x, 83); g.lineTo(12 + x + 4, 76); g.lineTo(12 + x + 8, 76); g.lineTo(12 + x + 4, 83);
+    g.closePath(); g.fill();
+  }
+
+  // Pump house with a lit window and a hose reel
+  g.fillStyle = '#2e3d4b'; rrIn(g, 17, 85, 22, 12, 3); g.fill();
+  g.fillStyle = '#0f1720'; rrIn(g, 20, 88, 16, 6, 2); g.fill();
+  g.fillStyle = '#ffd35c'; g.fillRect(21, 89, 14, 4);
+  g.strokeStyle = '#9ab0c6'; g.lineWidth = 1.6;
+  g.beginPath(); g.arc(13.5, 91, 4.4, 0, 7); g.stroke();
+  g.beginPath(); g.arc(42.5, 91, 4.4, 0, 7); g.stroke();
+
+  // Port / starboard lights
+  g.fillStyle = '#ff3b30'; g.beginPath(); g.arc(10.5, 16, 2.2, 0, 7); g.fill();
+  g.fillStyle = '#39e07a'; g.beginPath(); g.arc(45.5, 16, 2.2, 0, 7); g.fill();
+
+  // FUEL placard right behind the bow
+  g.fillStyle = 'rgba(8,14,20,0.9)'; rrIn(g, 16, 8.5, 24, 10, 2); g.fill();
+  g.fillStyle = '#ffd35c'; g.font = '700 8px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('FUEL', 28, 14);
 });
+
 
 // Trees
 function makeTree(v) {
@@ -582,8 +628,12 @@ let bridgesPassed = 0;
 let checkpointCam = 0;
 let spawnedUpTo = 40, spawnBlock = 0;
 let invuln = 0, deathTimer = 0, fireCd = 0, overTimer = 0, lowBeep = 0;
-let spreadT = 0, rapidT = 0, shieldT = 0;
-let rockets = 0, shieldCharges = 0;
+let spreadT = 0, rapidT = 0;
+let rockets = 0;
+// Shield state: energy in [0, SHIELD_MAX], short cooldown after an absorbed hit,
+// and a ripple counter used by the dome animation.
+let shieldEnergy = 0, shieldHitCd = 0, shieldRipple = 0;
+let refuelEnt = null;
 let combo = 0, comboT = 0;
 let shake = 0, shx = 0, shy = 0, flash = 0;
 let refueling = false;
@@ -596,9 +646,8 @@ const mouse = { on: false, x: W / 2, y: H / 2, fire: false, inside: false };
 const pauseBtn = { x: W / 2, y: 52, r: 16 };
 function touchButtons() {
   return {
-    fire: { x: W - 56, y: H - 112, r: 34 },
-    rocket: { x: W - 56, y: H - 198, r: 25 },
-    shield: { x: W - 56, y: H - 262, r: 25 }
+    fire: { x: W - 64, y: H - 120, r: 44 },
+    rocket: { x: W - 64, y: H - 214, r: 27 }
   };
 }
 function showTouchControls() {
@@ -660,34 +709,77 @@ function sfx(name) {
   else if (name === 'enemy') tone(500, 260, 0.1, 'triangle', 0.04);
   else if (name === 'pickup') { tone(520, 520, 0.08, 'square', 0.04); tone(780, 780, 0.08, 'square', 0.04, 0.07); tone(1040, 1040, 0.14, 'square', 0.04, 0.14); }
   else if (name === 'shield') tone(240, 900, 0.25, 'sine', 0.06);
+  else if (name === 'shieldhit') { tone(880, 520, 0.09, 'triangle', 0.05); tone(1320, 900, 0.06, 'sine', 0.03, 0.01); }
+  else if (name === 'shielddown') { tone(460, 110, 0.32, 'triangle', 0.055); noise(0.18, 0.06, 900); }
 }
 function startEngine() {
   const a = audio();
   if (!a || eng) return;
-  const o = a.createOscillator(), f = a.createBiquadFilter(), g = a.createGain();
-  const whine = a.createOscillator(), whineFilter = a.createBiquadFilter(), whineGain = a.createGain();
-  o.type = 'triangle'; o.frequency.value = 90;
-  f.type = 'lowpass'; f.frequency.value = 650;
-  g.gain.value = 0;
-  whine.type = 'sine'; whine.frequency.value = 420;
-  whineFilter.type = 'lowpass'; whineFilter.frequency.value = 1500;
-  whineGain.gain.value = 0;
-  o.connect(f); f.connect(g); g.connect(a.destination);
-  whine.connect(whineFilter); whineFilter.connect(whineGain); whineGain.connect(a.destination);
-  o.start(); whine.start();
-  eng = { o, f, g, whine, whineFilter, whineGain, mode: null };
+  const out = a.createGain();
+  out.gain.value = 0.9;
+  out.connect(a.destination);
+
+  // Jet: filtered turbine buzz plus a high sine whine.
+  const jetGain = a.createGain(); jetGain.gain.value = 0;
+  const jetFilter = a.createBiquadFilter(); jetFilter.type = 'lowpass'; jetFilter.frequency.value = 900; jetFilter.Q.value = 1.2;
+  const jet1 = a.createOscillator(); jet1.type = 'sawtooth'; jet1.frequency.value = 112;
+  const jet2 = a.createOscillator(); jet2.type = 'square'; jet2.frequency.value = 57;
+  const whine = a.createOscillator(); whine.type = 'sine'; whine.frequency.value = 1150;
+  const whineGain = a.createGain(); whineGain.gain.value = 0;
+  jet1.connect(jetFilter); jet2.connect(jetFilter); jetFilter.connect(jetGain); jetGain.connect(out);
+  whine.connect(whineGain); whineGain.connect(out);
+
+  // Patrol boat: low marine diesel with an amplitude throb plus a water wash.
+  const boatGain = a.createGain(); boatGain.gain.value = 0;
+  const boatFilter = a.createBiquadFilter(); boatFilter.type = 'lowpass'; boatFilter.frequency.value = 260; boatFilter.Q.value = 2;
+  const diesel = a.createOscillator(); diesel.type = 'sawtooth'; diesel.frequency.value = 46;
+  const thump = a.createGain(); thump.gain.value = 0.55;
+  const lfo = a.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 5.5;
+  const lfoGain = a.createGain(); lfoGain.gain.value = 0.4;
+  lfo.connect(lfoGain); lfoGain.connect(thump.gain);
+  diesel.connect(boatFilter); boatFilter.connect(thump); thump.connect(boatGain); boatGain.connect(out);
+
+  const wash = a.createBufferSource();
+  wash.buffer = loopNoise(a, 2);
+  wash.loop = true;
+  const washFilter = a.createBiquadFilter(); washFilter.type = 'lowpass'; washFilter.frequency.value = 700;
+  const washGain = a.createGain(); washGain.gain.value = 0;
+  wash.connect(washFilter); washFilter.connect(washGain); washGain.connect(out);
+
+  for (const n of [jet1, jet2, whine, diesel, lfo, wash]) n.start();
+  eng = { out, jetGain, jetFilter, jet1, jet2, whine, whineGain, boatGain, boatFilter, diesel, thump, washGain, washFilter, mode: null };
+}
+// Looping brown-ish noise: the boat's water wash instead of harsh static.
+function loopNoise(a, secs) {
+  const len = Math.max(1, Math.floor(a.sampleRate * secs));
+  const buf = a.createBuffer(1, len, a.sampleRate);
+  const d = buf.getChannelData(0);
+  let lp = 0;
+  for (let i = 0; i < len; i++) {
+    lp += ((Math.random() * 2 - 1) - lp) * 0.18;
+    d[i] = lp * 1.8;
+  }
+  return buf;
 }
 function engineUpdate() {
   if (!eng || !ac) return;
   const n = ac.currentTime, on = state === 'play' && !muted, boat = isBoatMode();
-  if (eng.mode !== boat) { eng.o.type = boat ? 'sine' : 'triangle'; eng.mode = boat; }
-  const tau = state === 'paused' ? 0.045 : 0.1;
-  eng.g.gain.setTargetAtTime(on ? (boat ? 0.046 : 0.016) : 0, n, tau);
-  eng.o.frequency.setTargetAtTime(boat ? 38 + sp * 9 : 74 + sp * 15, n, 0.1);
-  eng.f.frequency.setTargetAtTime(boat ? 145 + sp * 34 : 520 + sp * 100, n, 0.1);
-  eng.whineGain.gain.setTargetAtTime(on && !boat ? 0.009 : 0, n, tau);
-  eng.whine.frequency.setTargetAtTime(320 + sp * 58, n, 0.12);
-  eng.whineFilter.frequency.setTargetAtTime(1350 + sp * 80, n, 0.15);
+  const tau = state === 'paused' ? 0.045 : 0.09;
+  const speed = clamp((sp - baseSpeed()) / 1.8, 0, 1);
+  // Two separate voices, so a jet never sounds like a patrol boat: the jet is a
+  // filtered turbine buzz under a sine whine, the boat is a low diesel throb in water noise.
+  eng.jetGain.gain.setTargetAtTime(on && !boat ? 0.013 + speed * 0.012 : 0, n, tau);
+  eng.whineGain.gain.setTargetAtTime(on && !boat ? 0.008 + speed * 0.007 : 0, n, tau);
+  eng.jet1.frequency.setTargetAtTime(108 + speed * 42, n, 0.2);
+  eng.jet2.frequency.setTargetAtTime(54 + speed * 21, n, 0.2);
+  eng.jetFilter.frequency.setTargetAtTime(760 + speed * 980, n, 0.2);
+  eng.whine.frequency.setTargetAtTime(1120 + speed * 760, n, 0.2);
+  eng.boatGain.gain.setTargetAtTime(on && boat ? 0.052 + speed * 0.022 : 0, n, tau);
+  eng.diesel.frequency.setTargetAtTime(42 + speed * 22, n, 0.25);
+  eng.boatFilter.frequency.setTargetAtTime(235 + speed * 130, n, 0.25);
+  eng.washGain.gain.setTargetAtTime(on && boat ? 0.014 + speed * 0.014 : 0, n, tau);
+  eng.washFilter.frequency.setTargetAtTime(600 + speed * 520, n, 0.25);
+  eng.mode = boat;
 }
 
 // Find a bank position for each house that stays inland, within the viewport,
@@ -741,7 +833,7 @@ function spawnRow(r) {
   const wy = r * ROW + ROW / 2;
   const x = row.l + 40 + hash(r, 3) * (rw - 80);
   if (r % FUEL_EVERY === FUEL_EVERY / 2) {
-    ents.push({ kind: 'fuel', x: (row.l + row.r) / 2 + (hash(r, 4) - 0.5) * (rw - 90), wy, w: 38, h: 84, hp: 2, flash: 0 });
+    ents.push({ kind: 'fuel', x: (row.l + row.r) / 2 + (hash(r, 4) - 0.5) * (rw - 90), wy, w: 46, h: 96, hp: 2, flash: 0 });
     return;
   }
   if (r % 64 === 24) {
@@ -916,11 +1008,15 @@ function addScore(n, useCombo) {
 function saveHi() { try { localStorage.setItem('riverbreakerHi', String(hi)); } catch (e) {} }
 function showBanner(s, sub, dur) { banner.s = s; banner.sub = sub; banner.t = dur; banner.max = dur; }
 
-function resetPlayerFx() { spreadT = 0; rapidT = 0; shieldT = 0; combo = 0; comboT = 0; }
+function resetPlayerFx() {
+  spreadT = 0; rapidT = 0; combo = 0; comboT = 0;
+  shieldEnergy = 0; shieldHitCd = 0; shieldRipple = 0;
+  refueling = false; refuelEnt = null;
+}
 
 function newGame() {
   score = 0; lives = 3; fuel = 100; nextExtra = EXTRA_LIFE_EVERY;
-  rockets = 0; shieldCharges = 0;
+  rockets = 0;
   bridgesPassed = 0; checkpointCam = 0;
   cam = 0; sp = baseSpeed();
   ents = []; bullets = []; ebul = []; missiles = []; enemyRockets = []; parts = []; pods = []; pops = [];
@@ -939,14 +1035,17 @@ function respawn() {
   cam = checkpointCam;
   ents = []; bullets = []; ebul = []; missiles = []; enemyRockets = []; pods = [];
   resetPlayerFx();
-  spawnedUpTo = Math.floor(cam / ROW) + 40;
-  spawnBlock = 0;
-  ensureRows(Math.floor(cam / ROW) + 70);
+  const baseRow = Math.floor(cam / ROW);
+  spawnedUpTo = baseRow + 1;
+  // Quiet restart: the first half-screen after a respawn is generated but kept free
+  // of enemies. Without this the whole visible stretch spawned at once and the
+  // player was dropped straight into a wall of boats, helicopters and jets.
+  spawnBlock = baseRow + Math.ceil(H / ROW * 0.62) + 6;
+  ensureRows(baseRow + 110);
   const row = rowAt(playerWy());
   P.x = (row.l + row.r) / 2; P.vx = 0; P.bank = 0;
   sp = baseSpeed();
   invuln = 150;
-  shieldT = 0;
   state = 'play';
 }
 
@@ -955,6 +1054,7 @@ function sinkPlayer() {
   state = 'sinking';
   deathTimer = SINK_DURATION;
   touch.fire = false; inp.fire = false; mouse.fire = false;
+  refueling = false; refuelEnt = null;
   showBanner('OUT OF FUEL', isBoatMode() ? 'The patrol boat is going under' : 'Emergency water landing', SINK_DURATION);
   for (let i = 0; i < 3; i++) pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 30 + i * 8, max: 38, s: 10 + i * 7, g: 1.25 });
   sfx('splash');
@@ -963,19 +1063,33 @@ function killPlayer() {
   if (state !== 'play') return;
   state = 'dying';
   deathTimer = 100;
+  refueling = false; refuelEnt = null;
   buzz(220);
   boom(P.x, playerWy(), 2.2);
   flash = 0.7;
   shake = 16;
   sfx('big');
 }
-function hitPlayer() {
-  if (invuln > 0 || state !== 'play') return;
-  if (shieldT > 0) {
-    shieldT = 0; invuln = 60; shake = 8;
-    buzz(60);
-    pushPart({ k: 'ring', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 20, max: 20, s: 20, g: 2.5 });
-    sfx('shield');
+// Absorb a hit with the dome: energy drops, the shell ripples, the craft survives.
+// Once the energy reaches zero the shield collapses and the next hit is lethal.
+function hitPlayer(cost) {
+  if (invuln > 0 || state !== 'play' || shieldHitCd > 0) return;
+  if (shieldEnergy > 0) {
+    const drain = cost || SHIELD_BULLET_COST;
+    shieldEnergy = Math.max(0, shieldEnergy - drain);
+    shieldHitCd = 16;
+    shieldRipple = 1;
+    shake = Math.max(shake, 7);
+    buzz(45);
+    pushPart({ k: 'ring', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 20, max: 20, s: 24, g: 2.4 });
+    spark(P.x, playerWy(), 4);
+    sfx('shieldhit');
+    if (shieldEnergy === 0) {
+      shieldHitCd = 40;
+      shake = 10;
+      addPopup(P.x, PLAYER_SY - 44, 'SHIELD DOWN', '#ff9b7a');
+      sfx('shielddown');
+    }
     return;
   }
   killPlayer();
@@ -1022,7 +1136,7 @@ function nova() {
 const POD_INFO = {
   spread: { c: 'cyan', g: G_CYAN, l: 'S', name: 'SPREAD SHOT' },
   rapid: { c: 'amber', g: G_AMBER, l: 'R', name: 'RAPID FIRE' },
-  shield: { c: 'green', g: G_GREEN, l: 'D', name: 'FIELD CHARGE' },
+  shield: { c: 'green', g: G_GREEN, l: 'S', name: 'SHIELD' },
   rocket: { c: 'amber', g: G_AMBER, l: 'R', name: 'ROCKET' },
   nova: { c: 'mag', g: G_MAG, l: 'N', name: 'NOVA BLAST' }
 };
@@ -1030,21 +1144,25 @@ function collectPod(p) {
   sfx('pickup');
   if (p.kind === 'spread') spreadT = 720;
   else if (p.kind === 'rapid') rapidT = 720;
-  else if (p.kind === 'shield') shieldCharges = Math.min(MAX_SHIELD_CHARGES, shieldCharges + 1);
+  else if (p.kind === 'shield') raiseShield();
   else if (p.kind === 'rocket') rockets = Math.min(MAX_ROCKETS, rockets + 1);
   else nova();
-  const count = p.kind === 'shield' ? '  ' + shieldCharges : p.kind === 'rocket' ? '  ' + rockets : '';
+  const count = p.kind === 'rocket' ? '  ' + rockets : '';
   addPopup(P.x, PLAYER_SY - 30, POD_INFO[p.kind].name + count, '#ffffff');
 }
 
-function activateShield() {
-  if (state !== 'play' || shieldCharges <= 0 || shieldT > 0) return false;
-  shieldCharges--;
-  shieldT = SHIELD_DURATION;
-  pushPart({ k: 'ring', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 28, max: 28, s: 24, g: 2.2 });
+// Shields are automatic: a pod tops the energy pool up and the dome goes up at once.
+// There is no button and no stored charge any more.
+function raiseShield() {
+  if (state !== 'play' && state !== 'title') return false;
+  const before = shieldEnergy;
+  shieldEnergy = Math.min(SHIELD_MAX, shieldEnergy + SHIELD_PICKUP);
+  shieldHitCd = 0;
+  shieldRipple = 1;
+  pushPart({ k: 'ring', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 28, max: 28, s: 26, g: 2.2 });
   sfx('shield');
-  addPopup(P.x, PLAYER_SY - 42, 'FIELD ON', '#9defff');
-  return true;
+  addPopup(P.x, PLAYER_SY - 42, 'SHIELD ' + Math.round(shieldEnergy) + '%', '#9defff');
+  return shieldEnergy > before;
 }
 function rocketTarget(m) {
   let best = null, bestD = Infinity;
@@ -1081,7 +1199,7 @@ function updateEnemyRockets() {
     r.x += r.vx; r.y += r.vy; r.life--;
     if (r.life <= 0 || r.x < -30 || r.x > W + 30 || r.y < -40 || r.y > H + 40) { r.dead = true; continue; }
     if (Math.hypot(r.x - P.x, r.y - PLAYER_SY) < (isBoatMode() ? 19 : 16)) {
-      r.dead = true; hitPlayer();
+      r.dead = true; hitPlayer(SHIELD_ROCKET_COST);
       if (state !== 'play') return;
     }
   }
@@ -1139,7 +1257,18 @@ function updatePlay() {
   if (invuln > 0) invuln--;
   if (spreadT > 0) spreadT--;
   if (rapidT > 0) rapidT--;
-  if (shieldT > 0) shieldT--;
+  if (shieldHitCd > 0) shieldHitCd--;
+  if (shieldRipple > 0.01) shieldRipple *= 0.93; else shieldRipple = 0;
+  // The dome bleeds energy on its own, so it always fades out after a while.
+  if (shieldEnergy > 0) {
+    shieldEnergy = Math.max(0, shieldEnergy - SHIELD_DRAIN);
+    if (shieldEnergy === 0) {
+      shieldRipple = 1;
+      shake = Math.max(shake, 5);
+      addPopup(P.x, PLAYER_SY - 44, 'SHIELD DOWN', '#ff9b7a');
+      sfx('shielddown');
+    }
+  }
   if (comboT > 0 && --comboT === 0) combo = 0;
 
   // Fuel
@@ -1183,22 +1312,36 @@ function updatePlay() {
   for (const eb of ebul) {
     eb.x += eb.vx; eb.y += eb.vy;
     if (eb.y > H + 20 || eb.y < -30 || eb.x < -20 || eb.x > W + 20) { eb.dead = true; continue; }
-    if (Math.hypot(eb.x - P.x, eb.y - PLAYER_SY) < (isBoatMode() ? 16 : 13)) { eb.dead = true; hitPlayer(); if (state !== 'play') return; }
+    if (Math.hypot(eb.x - P.x, eb.y - PLAYER_SY) < (isBoatMode() ? 16 : 13)) { eb.dead = true; hitPlayer(SHIELD_BULLET_COST); if (state !== 'play') return; }
   }
   ebul = ebul.filter(eb => !eb.dead);
 
-  // Player against entities
+  // Player against entities. Air and water are separate layers: a patrol boat does
+  // not crash into jets or helicopters above it, and a jet does not crash into the
+  // boats passing underneath. Islands, houses, gun emplacements and bridges stay solid.
   refueling = false;
+  refuelEnt = null;
   for (const e of ents) {
     if (e.removed || (e.kind === 'bridge' && e.dead)) continue;
     const pb = playerBox();
     if (!overlap(P.x, PLAYER_SY, pb.w, pb.h, e.x, toScreenY(e.wy), e.w, e.h)) continue;
-    if (e.kind === 'fuel') refueling = true;
-    else if (isBoatMode() || (e.kind !== 'island' && e.kind !== 'house' && e.kind !== 'turret' && e.kind !== 'launcher')) { hitPlayer(); if (state !== 'play') return; }
+    if (e.kind === 'fuel') { refueling = true; refuelEnt = e; continue; }
+    if (isBoatMode()) {
+      if (e.kind === 'jet' || e.kind === 'heli') continue;       // aircraft fly above the river
+    } else {
+      if (e.kind === 'boat' || e.kind === 'gunboat') continue;   // boats are below the flight path
+      if (e.kind === 'island' || e.kind === 'house' || e.kind === 'turret' || e.kind === 'launcher') continue;
+    }
+    hitPlayer(SHIELD_CRASH_COST);
+    if (state !== 'play') return;
   }
   if (refueling) {
     fuel = Math.min(100, fuel + 0.9);
-    if (t % 5 === 0) sfx('fuel');
+    if (t % 12 === 0) sfx('fuel');
+    if (t % 3 === 0) {
+      pushPart({ k: 'fuel', x: P.x + (Math.random() - 0.5) * 22, wy: pwy - 6 + (Math.random() - 0.5) * 14,
+        vx: (Math.random() - 0.5) * 0.5, vy: 0.35 + Math.random() * 0.3, life: 20, max: 20, s: 2.4 });
+    }
   }
 
   // Power-ups
@@ -1218,13 +1361,19 @@ function updatePlay() {
     }
   }
 
-  // Player against the banks
+  // Player against the banks: lethal without a shield, absorbed by the dome otherwise.
   if (isBoatMode() && invuln <= 0) {
     const r0 = Math.floor((pwy - 18) / ROW), r1 = Math.floor((pwy + 18) / ROW);
     for (let r = r0; r <= r1; r++) {
       const row = rows[r];
-      const halfW = isBoatMode() ? 13 : 10;
-      if (row && (P.x - halfW < row.l - 1 || P.x + halfW > row.r + 1)) { killPlayer(); return; }
+      if (!row) continue;
+      const halfW = 13;
+      if (P.x - halfW >= row.l - 1 && P.x + halfW <= row.r + 1) continue;
+      P.x = clamp(P.x, row.l + halfW, row.r - halfW);
+      P.vx = 0;
+      if (shieldHitCd <= 0) hitPlayer(SHIELD_CRASH_COST);
+      if (state !== 'play') return;
+      break;
     }
   }
 }
@@ -1430,10 +1579,24 @@ function drawGround() {
     } else if (e.kind === 'bridge') {
       drawBridge(e);
     } else if (e.kind === 'fuel') {
-      glow(G_GREEN, e.x, sy, 130, 0.22 + 0.1 * Math.sin(t * 0.1));
+      const puls = 0.5 + 0.5 * Math.sin(t * 0.09);
+      // mooring ring in the water so the barge reads as a fuel stop
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120,255,190,' + (0.10 + 0.12 * puls) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.ellipse(e.x, sy + 4, 44 + puls * 7, 62 + puls * 7, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(120,255,190,' + (0.06 + 0.08 * puls) + ')';
+      ctx.beginPath(); ctx.ellipse(e.x, sy + 4, 54 + puls * 9, 74 + puls * 9, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      glow(G_GREEN, e.x, sy, 128 + puls * 16, 0.16 + 0.1 * puls);
       drawShadow(S_BARGE, e.x, sy, 0, 1, 5);
       drawSprite(S_BARGE, e.x, sy, 0, 1);
       drawFlash(S_BARGE, e.x, sy, 0, e);
+      // blinking masthead beacon
+      const beacon = t % 90 < 45;
+      glow(G_AMBER, e.x, sy - 43, 20, beacon ? 0.85 : 0.22);
+      ctx.fillStyle = beacon ? '#fff2b8' : '#c98a20';
+      ctx.beginPath(); ctx.arc(e.x, sy - 43, 2.6, 0, 7); ctx.fill();
     } else if (e.kind === 'boat' || e.kind === 'gunboat') {
       const d = e.vx >= 0 ? 1 : -1, rot = d > 0 ? Math.PI / 2 : -Math.PI / 2;
       const enemyBoat = e.kind === 'gunboat' ? S_GUNBOAT : S_BOAT;
@@ -1559,12 +1722,112 @@ function drawPlayer() {
   } else {
     drawPlayerJet(P.x, PLAYER_SY, P.bank, clamp((sp - baseSpeed()) / 1.8 + 0.3, 0, 1));
   }
-  if (shieldT > 0 && (shieldT > 120 || t % 10 < 6)) {
-    glow(G_CYAN, P.x, PLAYER_SY, 100, 0.5);
-    ctx.strokeStyle = 'rgba(140,235,255,' + (0.6 + 0.2 * Math.sin(t * 0.3)) + ')';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(P.x, PLAYER_SY, 38, 0, 7); ctx.stroke();
+  drawShieldDome(P.x, PLAYER_SY);
+}
+
+// Pulsing energy dome. It hugs the craft like a canopy: a soft cap, a bright rim,
+// contour rings, meridians, two travelling arcs and a ripple whenever a hit lands.
+// The brighter and steadier it looks, the more energy is left.
+function shieldPath(rx, ry) {
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, ry, 0, Math.PI, Math.PI * 2);   // canopy
+  ctx.ellipse(0, 0, rx, ry * 0.22, 0, 0, Math.PI);      // flattened base
+  ctx.closePath();
+}
+function drawShieldDome(x, y) {
+  if (shieldEnergy <= 0) return;
+  const k = shieldEnergy / SHIELD_MAX;
+  const pulse = 1 + Math.sin(t * 0.17) * 0.045;
+  const rx = (isBoatMode() ? 38 : 34) * pulse;
+  const ry = (isBoatMode() ? 41 : 37) * pulse;
+  const cy = y - 2;
+  const flick = k < 0.2 ? 0.62 + 0.38 * Math.abs(Math.sin(t * 0.55)) : 1;
+  ctx.save();
+  ctx.translate(x, cy);
+  ctx.globalAlpha = flick;
+  // shell
+  ctx.fillStyle = rad(ctx, 0, 0, ry * 0.12, rx, [
+    [0, 'rgba(120,235,255,0)'],
+    [0.58, 'rgba(80,210,255,' + (0.04 + 0.05 * k) + ')'],
+    [0.88, 'rgba(120,235,255,' + (0.10 + 0.14 * k) + ')'],
+    [1, 'rgba(200,250,255,' + (0.18 + 0.16 * k) + ')']
+  ]);
+  shieldPath(rx, ry);
+  ctx.fill();
+  // rim glow
+  ctx.shadowColor = 'rgba(110,235,255,0.85)';
+  ctx.shadowBlur = 10 + 8 * Math.sin(t * 0.2);
+  ctx.strokeStyle = 'rgba(180,247,255,' + (0.5 + 0.35 * k) + ')';
+  ctx.lineWidth = 2.2;
+  shieldPath(rx, ry);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  // contour rings
+  ctx.strokeStyle = 'rgba(190,248,255,0.6)';
+  for (let i = 1; i <= 3; i++) {
+    const f = i / 4;
+    ctx.globalAlpha = flick * (0.40 - i * 0.06 + 0.09 * Math.sin(t * 0.18 + i * 1.7));
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx * f, ry * f, 0, Math.PI, Math.PI * 2);
+    ctx.stroke();
   }
+  ctx.globalAlpha = flick;
+  // meridians
+  ctx.strokeStyle = 'rgba(210,250,255,' + (0.18 + 0.18 * k) + ')';
+  ctx.lineWidth = 1;
+  for (const f of [0.32, 0.62, 0.88]) {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx * f, ry, 0, Math.PI, Math.PI * 2);
+    ctx.stroke();
+  }
+  // two travelling arcs on the rim
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(240,255,255,0.75)';
+  for (let i = 0; i < 2; i++) {
+    const a0 = t * 0.06 + i * Math.PI;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, a0, a0 + 0.6); ctx.stroke();
+  }
+  // hit ripple
+  if (shieldRipple > 0.02) {
+    const g = 1 - shieldRipple;
+    ctx.globalAlpha = flick * shieldRipple;
+    ctx.lineWidth = 2 + 3 * shieldRipple;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    shieldPath(rx * (1 + 0.32 * g), ry * (1 + 0.32 * g));
+    ctx.stroke();
+  }
+  ctx.globalAlpha = flick * (0.35 + 0.2 * k);
+  // waterline where the dome meets the hull
+  ctx.strokeStyle = 'rgba(150,240,255,0.85)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.ellipse(0, 0, rx, ry * 0.22, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+
+// Hose and fuel flow drawn while the craft is taking on fuel at the barge.
+function drawRefuelHose() {
+  if (!refueling || !refuelEnt) return;
+  const bx = refuelEnt.x, by = toScreenY(refuelEnt.wy) + 34;
+  const tx = P.x, ty = PLAYER_SY - 2;
+  const wob = Math.sin(t * 0.18) * 8;
+  const mx = (bx + tx) / 2 + wob, my = (by + ty) / 2 + 16;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = 'rgba(10,16,22,0.9)'; ctx.lineWidth = 5.5;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,200,80,0.95)'; ctx.lineWidth = 2.2;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
+  // fuel travelling down the hose
+  ctx.setLineDash([6, 12]);
+  ctx.lineDashOffset = -(t * 1.2) % 18;
+  ctx.strokeStyle = 'rgba(150,255,205,0.95)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(bx, by); ctx.quadraticCurveTo(mx, my, tx, ty); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+  // intake halo
+  glow(G_GREEN, tx, ty + 10, 46, 0.3 + 0.15 * Math.sin(t * 0.4));
 }
 
 function drawBullets() {
@@ -1611,6 +1874,10 @@ function drawParts() {
       ctx.beginPath(); ctx.arc(p.x, sy, p.s, 0, 7); ctx.fill();
     } else if (p.k === 'spark') {
       glow(G_HOT, p.x, sy, 8, k);
+    } else if (p.k === 'fuel') {
+      glow(G_GREEN, p.x, sy, 12, k);
+      ctx.fillStyle = 'rgba(190,255,215,' + (k * 0.9) + ')';
+      ctx.beginPath(); ctx.arc(p.x, sy, 1.2 + p.s * 0.35, 0, 7); ctx.fill();
     } else if (p.k === 'bubble') {
       ctx.strokeStyle = 'rgba(205,246,255,' + (k * 0.7) + ')'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, sy, p.s, 0, Math.PI * 2); ctx.stroke();
@@ -1657,7 +1924,16 @@ function drawHud() {
 
   txt('LIVES', W - 18, 26, F_LBL, 'rgba(232,238,246,0.65)', 'right');
   txt('ROCKETS ' + rockets, W - 18, 91, '600 12px "Saira Condensed", sans-serif', rockets ? '#ffd37a' : 'rgba(232,238,246,0.48)', 'right');
-  txt('FIELDS ' + shieldCharges, W - 18, 108, '600 12px "Saira Condensed", sans-serif', shieldCharges ? '#8feaff' : 'rgba(232,238,246,0.48)', 'right');
+  // Shield energy: a meter instead of a count of stored charges.
+  const shOn = shieldEnergy > 0, shFrac = clamp(shieldEnergy / SHIELD_MAX, 0, 1);
+  txt('SHIELD', W - 18, 108, '600 12px "Saira Condensed", sans-serif', shOn ? '#8feaff' : 'rgba(232,238,246,0.48)', 'right');
+  const sbW = 66, sbH = 6, sbX = W - 18 - sbW, sbY = 113;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(sbX, sbY, sbW, sbH, 3); ctx.fill();
+  if (shOn) {
+    ctx.fillStyle = shFrac < 0.24 ? (t % 16 < 8 ? '#ff8a6a' : '#b04a34')
+      : lin(ctx, sbX, 0, sbX + sbW, 0, [[0, '#3ddc84'], [1, '#9defff']]);
+    rr(sbX, sbY, Math.max(3, sbW * shFrac), sbH, 3); ctx.fill();
+  }
   for (let i = 0; i < Math.min(6, Math.max(0, lives - 1)); i++) {
     ctx.drawImage((isBoatMode() ? S_PLAYER_BOAT : S_PLAYER).c, W - 34 - i * 28, 34, isBoatMode() ? 18 : 26, isBoatMode() ? 30 : 29);
   }
@@ -1675,7 +1951,16 @@ function drawHud() {
   const low = f < 0.25;
   ctx.fillStyle = 'rgba(4,10,20,0.6)'; rr(gx - 6, gy - 22, gw + 12, 42, 8); ctx.fill();
   txt('FUEL', gx, gy - 8, F_LBL, low && t % 20 < 10 ? '#ff6a5e' : 'rgba(232,238,246,0.75)');
-  if (refueling) txt('REFUELING', gx + gw, gy - 8, F_LBL, '#7dffb0', 'right');
+  if (refueling) {
+    const glowA = 8 + 6 * Math.sin(t * 0.35);
+    ctx.save();
+    ctx.shadowColor = 'rgba(125,255,176,0.9)'; ctx.shadowBlur = glowA;
+    txt('REFUELING ' + Math.round(fuel) + '%', gx + gw, gy - 8, '700 12px "Saira Condensed", sans-serif', '#7dffb0', 'right');
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(125,255,176,' + (0.35 + 0.25 * Math.sin(t * 0.3)) + ')';
+    ctx.lineWidth = 1.5;
+    rr(gx - 3, gy - 3, gw + 6, 18, 8); ctx.stroke();
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(gx, gy, gw, 12, 6); ctx.fill();
   if (f > 0.01) {
     ctx.fillStyle = low ? (t % 20 < 10 ? '#ff4d3f' : '#8a2a24')
@@ -1686,7 +1971,7 @@ function drawHud() {
   txt('F', gx + gw + 1, gy + 16, '600 10px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.5)', 'right');
 
   // Power-up timers
-  const chips = [['SPREAD', spreadT, 720, '#5fe0ff'], ['RAPID', rapidT, 720, '#ffbe4a'], ['FIELD', shieldT, SHIELD_DURATION, '#6dffb0']];
+  const chips = [['SPREAD', spreadT, 720, '#5fe0ff'], ['RAPID', rapidT, 720, '#ffbe4a'], ['SHIELD', shieldEnergy, SHIELD_MAX, '#6dffb0']];
   let cx = 18;
   for (const c of chips) {
     if (c[1] <= 0) continue;
@@ -1767,7 +2052,6 @@ function drawPointers() {
       }
       ctx.restore();
     };
-    paint(b.shield, 'FIELD', shieldCharges, '#70e8ff', shieldT > 0, false);
     paint(b.rocket, 'ROCKET', rockets, '#ffb02e', false, false);
     paint(b.fire, 'FIRE', 1, '#ffcf72', touch.fire, true);
   }
@@ -1796,7 +2080,8 @@ function drawTitle() {
   txt('BEST ' + String(hi).padStart(7, '0'), W / 2, 330, '600 16px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.7)', 'center');
   if (blink) txt('PRESS ENTER OR TAP TO START', W / 2, 586, '700 22px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(255,255,255,0.35)');
   txt('Protect homes (-150); dodge straight rockets; destroy turrets (+180)', W / 2, 622, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
-  txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, C field', W / 2, 644, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
+  txt('Shields raise on pickup, drain with every hit and fade with time', W / 2, 644, '400 12px "Saira", sans-serif', 'rgba(150,255,208,0.7)', 'center');
+  txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, P pause', W / 2, 666, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
   ctx.restore();
 }
 
@@ -1807,6 +2092,7 @@ function render() {
   drawPods();
   drawAir();
   drawPlayer();
+  drawRefuelHose();
   drawBullets();
   drawParts();
   drawClouds();
@@ -1855,7 +2141,6 @@ window.addEventListener('keydown', e => {
   if (e.code === 'KeyP') togglePause();
   if (e.code === 'KeyM') muted = !muted;
   if (e.code === 'KeyV') launchRocket();
-  if (e.code === 'KeyC') activateShield();
 });
 window.addEventListener('keyup', e => {
   const k = KEYMAP[e.code];
@@ -1887,7 +2172,6 @@ cv.addEventListener('pointerdown', e => {
     const b = touchButtons();
     if (insideButton(p, b.fire)) { touch.fire = true; touch.firePointerId = e.pointerId; e.preventDefault(); return; }
     if (insideButton(p, b.rocket)) { launchRocket(); e.preventDefault(); return; }
-    if (insideButton(p, b.shield)) { activateShield(); e.preventDefault(); return; }
   }
   touch.active = true; touch.pointerId = e.pointerId; touch.sx = p.x; touch.sy = p.y; touch.cx = p.x; touch.cy = p.y;
   touch.bx = P.x; touch.targetX = P.x;

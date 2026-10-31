@@ -9,6 +9,9 @@ What is inside
   fonts/                Saira fonts, Latin subset (SIL Open Font License)
   screenshots/          used by the browser install dialog
   .htaccess             cache and MIME settings for Apache
+  tools/                check.mjs, smoke.mjs, build.mjs (no dependencies)
+  .github/workflows/    ci.yml (pull requests) and deploy.yml (master)
+  DEPLOY-CI.md          automatic, least-privilege deployment over SSH
 
 Requirements
   - HTTPS (service workers do not work on plain http, except localhost)
@@ -45,10 +48,22 @@ Check after deploy
   Open https://senssoft.com/river/ once with internet, wait a few seconds,
   then switch off the network and reload. The game must still start.
 
-Release a new version
+Release a new version (automatic, recommended)
+  1. Open a pull request. CI runs: node tools/check.mjs (structure, manifest,
+     service worker, assets), node tools/smoke.mjs (headless gameplay test)
+     and node tools/build.mjs (build into dist/).
+  2. Merge to master. The Deploy workflow rebuilds, waits for the approval of
+     the "production" environment, rsyncs dist/ over SSH and checks the live
+     site. The cache version in sw.js is stamped with the commit id, so every
+     player picks up the new build on the next launch.
+  See DEPLOY-CI.md for the one-time server and GitHub setup.
+
+Release by hand (fallback)
   1. Change files.
-  2. Change VERSION in sw.js (for example riverbreaker-v4).
+  2. Change VERSION in sw.js (for example riverbreaker-v5).
   3. Upload. Players get the new version on the next launch.
+  The same checks run locally with:
+     node tools/check.mjs && node tools/smoke.mjs && node tools/build.mjs
 
 Notes
   - The first visit needs internet. After that the game works offline.
