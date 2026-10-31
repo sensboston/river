@@ -36,7 +36,9 @@ The river is a chain of sectors, not an endless scroller:
 * each sector is rated **1-3 stars** (cleared / mission done / no life lost) and the
   stars are stored in `localStorage`, so progress survives between sessions;
 * sector difficulty scales: enemy density, mine fields and storm frequency all grow
-  with the sector number.
+  with the sector number;
+* a qualifying score ends the run on the arcade **initials screen**: three letters,
+  five slots, best scores shown on the title screen between sessions.
 
 The draft screen is deliberately the only place a full-screen ad could go: it is a
 natural pause between missions, never mid-run.
@@ -75,7 +77,7 @@ node tools/build.mjs     # writes dist/ and stamps sw.js with the commit id
 objects, drives thousands of frames and asserts the rules that are easy to break:
 air and water collision layers, shield energy, refuelling, respawn safety, mines,
 storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
-upgrade draft and star persistence.
+upgrade draft, star persistence and the initials/hi-score flow.
 
 ## Deployment
 

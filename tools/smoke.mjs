@@ -61,6 +61,13 @@ window.__rb = {
   get cam() { return cam; },
   get livesLost() { return livesLost; },
   totalStars, chooseUpgrade, finishDistrict, killEnt, startMission, missionTick,
+  get score() { return score; },
+  set score(v) { score = v; },
+  get lives() { return lives; },
+  set lives(v) { lives = v; },
+  get scoreTable() { return scoreTable; },
+  get entry() { return entry; },
+  confirmEntry, entrySetLetter, qualifiesForTable,
   get P() { return P; },
   get score() { return score; },
   newGame, respawn, raiseShield, hitPlayer, update, spawnRow,
@@ -515,6 +522,41 @@ for (const mode of ['desktop', 'touch']) {
     assert.notEqual(after, snap, 'the chosen upgrade had no effect');
     assert.ok(card && card.id, 'the card should have an id');
     assert.equal(api.mission.done, 0, 'the next district starts with a fresh mission');
+  });
+
+  check(`[${mode}] a record run asks for initials and reaches the board`, () => {
+    api.newGame();
+    api.score = 54321;
+    api.lives = 1;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    assert.equal(api.state, 'dying');
+    step(130);
+    assert.equal(api.state, 'entry', 'a top score should open the initials screen');
+    api.entrySetLetter(0, 1);          // A -> B
+    api.entrySetLetter(1, 25);         // A -> Z
+    assert.equal(api.entry.name[0], 'B');
+    assert.equal(api.entry.name[1], 'Z');
+    assert.equal(api.confirmEntry(), true);
+    assert.equal(api.state, 'over');
+    assert.equal(api.scoreTable[0].s, 54321);
+    assert.equal(api.scoreTable[0].n[0], 'B');
+    assert.ok(api.scoreTable.length <= 5, 'the board keeps five entries');
+  });
+
+  check(`[${mode}] a weak run goes straight to game over`, () => {
+    api.newGame();
+    api.score = 0;
+    api.lives = 1;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    assert.equal(api.qualifiesForTable(0), false);
+    api.hitPlayer(999);
+    step(130);
+    assert.notEqual(api.state, 'entry');
   });
 
   check(`[${mode}] long run with restarts stays stable`, () => {
