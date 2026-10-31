@@ -68,6 +68,12 @@ window.__rb = {
   get scoreTable() { return scoreTable; },
   get entry() { return entry; },
   confirmEntry, entrySetLetter, qualifiesForTable,
+  get revives() { return revives; },
+  set revives(v) { revives = v; },
+  get diffIndex() { return diffIndex; },
+  setDifficulty,
+  get fuel() { return fuel; },
+  get weather() { return weather; },
   get P() { return P; },
   get score() { return score; },
   newGame, respawn, raiseShield, hitPlayer, update, spawnRow,
@@ -524,10 +530,57 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(api.mission.done, 0, 'the next district starts with a fresh mission');
   });
 
+  check(`[${mode}] a second wind keeps the run going once`, () => {
+    api.newGame();
+    api.lives = 1;
+    api.revives = 1;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.equal(api.state, 'play', 'the run should continue after the second wind');
+    assert.equal(api.lives, 1, 'back in with one life');
+    assert.equal(api.revives, 0, 'the second wind is spent');
+    api.lives = 1;
+    api.shieldEnergy = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.notEqual(api.state, 'play', 'the next death really ends the run');
+  });
+
+  check(`[${mode}] the first sector is a safe tutorial`, () => {
+    api.newGame();
+    api.shieldEnergy = 100;
+    for (let i = 0; i < 260; i++) { api.invuln = 999; step(1); }
+    assert.equal(api.ents.some(e => e.kind === 'mine'), false, 'no mines in the opening sector');
+    assert.equal(api.weather.some(w => w.kind === 'storm'), false, 'no storms in the opening sector');
+  });
+
+  check(`[${mode}] difficulty changes the pressure`, () => {
+    api.setDifficulty(0);                        // CHILL
+    api.newGame();
+    api.fuel = 60;
+    step(60);
+    const chill = 60 - api.fuel;
+    api.setDifficulty(2);                        // ARCADE
+    api.newGame();
+    api.fuel = 60;
+    step(60);
+    const arcade = 60 - api.fuel;
+    assert.ok(arcade > chill * 1.2, `arcade burn ${arcade.toFixed(2)} should exceed chill ${chill.toFixed(2)}`);
+    assert.equal(api.lives, 2, 'arcade starts with fewer lives');
+    api.setDifficulty(1);                        // back to STANDARD for the rest
+    api.newGame();
+    assert.equal(api.lives, 3);
+  });
+
   check(`[${mode}] a record run asks for initials and reaches the board`, () => {
     api.newGame();
     api.score = 54321;
     api.lives = 1;
+    api.revives = 0;
     api.shieldEnergy = 0;
     api.shieldHitCd = 0;
     api.invuln = 0;
@@ -550,6 +603,7 @@ for (const mode of ['desktop', 'touch']) {
     api.newGame();
     api.score = 0;
     api.lives = 1;
+    api.revives = 0;
     api.shieldEnergy = 0;
     api.shieldHitCd = 0;
     api.invuln = 0;

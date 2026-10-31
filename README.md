@@ -16,6 +16,16 @@ DEPLOY-CI.md          automatic deployment: server setup, secrets, threat model
 DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 ```
 
+## Difficulty and onboarding
+
+* Three temperaments on the title screen (`Chill` / `Standard` / `Arcade`) change
+  enemy density, hazard frequency, fuel burn, enemy fire rate, starting lives and
+  whether the run gets a free second wind. The choice is remembered.
+* The first sector is a quiet tutorial: no mines, no storm cells, fewer enemies and
+  three coaching lines (steer, fire, break the bridge).
+* Soft failure: the first time the last life is lost, the run gets one **second
+  wind** instead of ending. Chill and Standard have one, Arcade has none.
+
 ## Controls
 
 * Mouse: move to steer, hold the left button to fire, right button or `V` for a rocket.
@@ -77,7 +87,8 @@ node tools/build.mjs     # writes dist/ and stamps sw.js with the commit id
 objects, drives thousands of frames and asserts the rules that are easy to break:
 air and water collision layers, shield energy, refuelling, respawn safety, mines,
 storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
-upgrade draft, star persistence and the initials/hi-score flow.
+upgrade draft, star persistence, the initials/hi-score flow, difficulty scaling,
+the tutorial sector and the second wind.
 
 ## Deployment
 
