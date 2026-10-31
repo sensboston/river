@@ -23,13 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Optional build steps for bundled projects (e.g., Vite, Webpack, npm scripts):
       # - name: Setup Node.js
       #   uses: actions/setup-node@v4
       #   with:
-      #     node-version: '20'
+      #     node-version: '22'
       # - name: Install dependencies
       #   run: npm ci
       # - name: Build static assets
@@ -39,7 +39,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           # Path to directory containing index.html (use '.' for repository root or './dist' for build output)
           path: '.'
