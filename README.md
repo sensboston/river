@@ -25,6 +25,22 @@ DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 Shields are automatic: a shield pod raises the dome at once, and the dome drains
 with time and with every hit it absorbs. When the meter is empty the next hit hurts.
 
+## Progression
+
+The river is a chain of sectors, not an endless scroller:
+
+* every sector has **one mission** (destroy targets, sweep mines, collect pods) with
+  a live counter in the HUD and a score bonus;
+* the sector ends at the bridge, which opens a **report + upgrade draft** screen:
+  three of six upgrades (fire rate, fuel burn, rockets, shield, life, score);
+* each sector is rated **1-3 stars** (cleared / mission done / no life lost) and the
+  stars are stored in `localStorage`, so progress survives between sessions;
+* sector difficulty scales: enemy density, mine fields and storm frequency all grow
+  with the sector number.
+
+The draft screen is deliberately the only place a full-screen ad could go: it is a
+natural pause between missions, never mid-run.
+
 ## Hazards
 
 * **Fuel barges** are rare: one every 400 rows, so the tank has to be managed.
@@ -58,7 +74,8 @@ node tools/build.mjs     # writes dist/ and stamps sw.js with the commit id
 `tools/smoke.mjs` executes the game script against stubbed DOM/Canvas/Audio
 objects, drives thousands of frames and asserts the rules that are easy to break:
 air and water collision layers, shield energy, refuelling, respawn safety, mines,
-storm cells, the rocket lock and the out-of-fuel sequence.
+storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
+upgrade draft and star persistence.
 
 ## Deployment
 

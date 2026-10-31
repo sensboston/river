@@ -676,7 +676,7 @@ function rowAt(wy) {
 }
 
 // Game state
-let state = 'title';   // title, play, dying, sinking, paused, over
+let state = 'title';   // title, play, dying, sinking, paused, over, draft
 let pausedFrom = 'play';
 let t = 0;
 let cam = 0;           // world distance travelled (world y grows upward)
@@ -721,6 +721,126 @@ function showTouchControls() {
 function insideButton(p, b) { return Math.hypot(p.x - b.x, p.y - b.y) <= b.r + 7; }
 let touchUsed = false;
 function buzz(ms) { try { if (touchUsed && navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
+
+// --- Progression ----------------------------------------------------------
+// A run is a chain of districts. Every district has one mission, ends at a bridge
+// and then hands out a choice of upgrades. Stars are kept between sessions, so a
+// run always leaves something behind even when it ends badly.
+const SAVE_KEY = 'riverbreakerProgress';
+const progress = { best: {}, stars: 0 };
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (o && typeof o === 'object' && o.best) {
+      for (const k in o.best) {
+        const v = Math.max(0, Math.min(3, Number(o.best[k]) || 0));
+        if (v > 0) progress.best[k] = v;
+      }
+    }
+  } catch (e) {}
+}
+function totalStars() { let n = 0; for (const k in progress.best) n += progress.best[k] || 0; return n; }
+function saveProgress() {
+  progress.stars = totalStars();
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({ best: progress.best, stars: progress.stars })); } catch (e) {}
+}
+loadProgress();
+
+// One mission per district. Air districts ask for kills or pods, river districts
+// for mines, so the objective always fits the craft you are flying.
+const MISSION_KINDS = {
+  sweep: { label: 'DESTROY TARGETS', base: 4, step: 1.5, bonus: 500 },
+  pods: { label: 'COLLECT POWER-UPS', base: 2, step: 0.8, bonus: 500 },
+  mine: { label: 'SWEEP THE MINES', base: 3, step: 1.2, bonus: 600 }
+};
+let mission = { id: '', label: '', goal: 1, done: 0, complete: false, bonus: 0 };
+let livesLost = 0;            // within the current district: decides the third star
+function missionFor(d) {
+  const air = (d - 1) % 2 === 0;
+  const ids = air ? ['sweep', 'pods'] : ['mine', 'sweep'];
+  return ids[Math.floor((d - 1) / 2) % 2];
+}
+function startMission(d) {
+  const id = missionFor(d), k = MISSION_KINDS[id];
+  mission = {
+    id, label: k.label, goal: Math.min(24, Math.round(k.base + (d - 1) * k.step)),
+    done: 0, complete: false, bonus: k.bonus + d * 100
+  };
+  livesLost = 0;
+}
+function missionTick(id) {
+  if (!mission.id || mission.complete || mission.id !== id) return;
+  mission.done = Math.min(mission.goal, mission.done + 1);
+  if (mission.done >= mission.goal) {
+    mission.complete = true;
+    const gain = addScore(mission.bonus, false);
+    showBanner('MISSION COMPLETE', mission.label + ' +' + gain, 130);
+    sfx('pickup');
+  }
+}
+
+// Upgrades are the reason to keep going: every cleared district makes the craft
+// measurably stronger, in a different direction each run.
+const UPGRADES = [
+  { id: 'rockets', name: 'ORDNANCE', desc: '+2 rockets', icon: 'R', c: '#ffbe4a' },
+  { id: 'shield', name: 'FIELD DOME', desc: 'Shield to full', icon: 'S', c: '#8feaff' },
+  { id: 'fire', name: 'AUTOCANNON', desc: 'Fire rate +30%', icon: 'A', c: '#ffd37a' },
+  { id: 'fuel', name: 'LONG RANGE', desc: 'Fuel burn -20%', icon: 'F', c: '#7dffb0' },
+  { id: 'hull', name: 'REINFORCED', desc: '+1 life', icon: 'H', c: '#ff9b7a' },
+  { id: 'score', name: 'BOUNTY', desc: 'Score +25%', icon: 'C', c: '#ff5ad2' }
+];
+const perks = { fire: 0, fuel: 0, score: 0 };
+let rocketMax = MAX_ROCKETS;
+const draft = { cards: [], district: 0, stars: 0 };
+function fireRateK() { return Math.pow(0.75, perks.fire); }
+function fuelBurnK() { return Math.pow(0.8, perks.fuel); }
+function scoreK() { return Math.pow(1.25, perks.score); }
+function pickUpgrades(n) {
+  const pool = UPGRADES.slice();
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+  }
+  return pool.slice(0, n);
+}
+function applyUpgrade(u) {
+  if (!u) return;
+  if (u.id === 'rockets') { rocketMax += 2; rockets = Math.min(rocketMax, rockets + 2); }
+  else if (u.id === 'shield') { shieldEnergy = SHIELD_MAX; shieldHitCd = 0; shieldRipple = 1; }
+  else if (u.id === 'fire') perks.fire++;
+  else if (u.id === 'fuel') perks.fuel++;
+  else if (u.id === 'hull') lives = Math.min(MAX_LIVES + 2, lives + 1);
+  else if (u.id === 'score') perks.score++;
+  sfx('pickup');
+}
+// End of a district: stars, then the upgrade draft. This is also the only, and
+// therefore safe, place for an interstitial ad in a monetised build.
+function finishDistrict() {
+  const d = bridgesPassed;
+  const stars = 1 + (mission.complete ? 1 : 0) + (mission.complete && livesLost === 0 ? 1 : 0);
+  progress.best[d] = Math.max(progress.best[d] || 0, stars);
+  saveProgress();
+  draft.district = d;
+  draft.stars = stars;
+  draft.cards = pickUpgrades(3);
+  banner.t = 0;
+  touch.fire = false; inp.fire = false; mouse.fire = false;
+  state = 'draft';
+}
+function chooseUpgrade(i) {
+  if (state !== 'draft') return false;
+  const u = draft.cards[i];
+  if (!u) return false;
+  applyUpgrade(u);
+  draft.cards = [];
+  state = 'play';
+  startMission(sectorNo());
+  invuln = Math.max(invuln, 70);
+  showBanner('SECTOR ' + sectorNo() + ' · ' + sectorLabel(), 'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal, 150);
+  return true;
+}
 
 const toScreenY = wy => H - (wy - cam);
 const playerWy = () => cam + PLAYER_OFFSET;
@@ -923,7 +1043,7 @@ function spawnRow(r) {
   // up the river, dark storm cells. A storm only strikes after a visible flicker,
   // so it never kills out of nowhere.
   if (sec % 2 === 0 && r > 30 && r % STORM_EVERY === STORM_ROW) {
-    const storm = r > 300 && hash(r, 61) < 0.42;
+    const storm = r > 300 && hash(r, 61) < Math.min(0.72, 0.34 + sec * 0.05);
     weather.push({
       kind: storm ? 'storm' : 'cloud',
       x: 70 + hash(r, 62) * (W - 140), wy: wy + 26,
@@ -935,7 +1055,8 @@ function spawnRow(r) {
   // Anchored mines: the patrol boat detonates on them, the jet flies over them.
   // They are placed only in the navigable part of the row, never on the banks.
   if (r > 90 && r % MINE_EVERY === MINE_ROW) {
-    const n = 1 + (hash(r, 71) < 0.34 ? 1 : 0) + (hash(r, 72) < 0.16 ? 1 : 0);
+    const n = 1 + (hash(r, 71) < 0.34 ? 1 : 0) + (hash(r, 72) < 0.16 ? 1 : 0) +
+      (sec >= 2 && hash(r, 74) < 0.22 ? 1 : 0);
     for (let i = 0; i < n; i++) {
       ents.push({
         kind: 'mine', x: row.l + 54 + hash(r, 73 + i) * Math.max(24, rw - 108),
@@ -1113,6 +1234,7 @@ function addScore(n, useCombo) {
     comboT = 150;
     gain = n * Math.min(8, 1 + Math.floor(combo / 2));
   }
+  if (gain > 0) gain = Math.round(gain * scoreK());
   if (gain < 0) score = Math.max(0, score + gain);
   else score += gain;
   while (score >= nextExtra) {
@@ -1133,7 +1255,10 @@ function resetPlayerFx() {
 
 function newGame() {
   score = 0; lives = 3; fuel = 100; nextExtra = EXTRA_LIFE_EVERY;
-  rockets = 0;
+  rockets = 0; rocketMax = MAX_ROCKETS;
+  perks.fire = 0; perks.fuel = 0; perks.score = 0;
+  draft.cards = []; draft.district = 0; draft.stars = 0;
+  startMission(1);
   bridgesPassed = 0; checkpointCam = 0;
   cam = 0; sp = baseSpeed();
   ents = []; bullets = []; ebul = []; missiles = []; enemyRockets = []; parts = []; pods = []; pops = [];
@@ -1145,7 +1270,7 @@ function newGame() {
   invuln = 90; fireCd = 0;
   state = 'play';
   startEngine();
-  showBanner('SECTOR 1 · AIR PATROL', 'Break the bridge to take command of a patrol boat', 150);
+  showBanner('SECTOR 1 · AIR PATROL', 'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal, 150);
 }
 
 function respawn() {
@@ -1237,6 +1362,8 @@ function hitPlayer(cost) {
 
 const PTS = { boat: 150, gunboat: 220, heli: 250, jet: 300, turret: 180, launcher: 260, house: -150, fuel: 50, bridge: 1000, mine: 120 };
 function killEnt(e) {
+  if (e.kind === 'mine') missionTick('mine');
+  else if (e.kind !== 'fuel' && e.kind !== 'house' && e.kind !== 'bridge') missionTick('sweep');
   const sy = toScreenY(e.wy);
   const gain = addScore(PTS[e.kind] || 0, e.kind !== 'fuel' && e.kind !== 'house');
   addPopup(e.x, sy, (gain < 0 ? '' : '+') + gain, gain < 0 ? '#ff7272' : '#ffd37a');
@@ -1293,10 +1420,11 @@ const POD_INFO = {
 };
 function collectPod(p) {
   sfx('pickup');
+  missionTick('pods');
   if (p.kind === 'spread') spreadT = 720;
   else if (p.kind === 'rapid') rapidT = 720;
   else if (p.kind === 'shield') raiseShield();
-  else if (p.kind === 'rocket') rockets = Math.min(MAX_ROCKETS, rockets + 1);
+  else if (p.kind === 'rocket') rockets = Math.min(rocketMax, rockets + 1);
   else nova();
   const count = p.kind === 'rocket' ? '  ' + rockets : '';
   addPopup(P.x, PLAYER_SY - 30, POD_INFO[p.kind].name + count, '#ffffff');
@@ -1439,7 +1567,7 @@ function updatePlay() {
   if (comboT > 0 && --comboT === 0) combo = 0;
 
   // Fuel
-  fuel -= 0.06;
+  fuel -= 0.06 * fuelBurnK();
   if (fuel < 25 && --lowBeep <= 0) { sfx('low'); lowBeep = 30; }
   if (fuel <= 0) { fuel = 0; sinkPlayer(); return; }
 
@@ -1455,7 +1583,7 @@ function updatePlay() {
   if (fireCd > 0) fireCd--;
   if ((inp.fire || touch.fire || mouse.fire) && fireCd <= 0) {
     firePlayer();
-    fireCd = rapidT > 0 ? 5 : 10;
+    fireCd = Math.max(3, Math.round((rapidT > 0 ? 5 : 10) * fireRateK()));
   }
   for (const bl of bullets) {
     bl.x += bl.vx; bl.y += bl.vy;
@@ -1558,8 +1686,9 @@ function updatePlay() {
       e.passed = true;
       bridgesPassed++;
       checkpointCam = e.wy + ROW * 4;
-      const bonus = addScore(500, false);
-      showBanner('SECTOR ' + sectorNo() + ' · ' + sectorLabel(), 'Bridge cleared +' + bonus, 150);
+      addScore(500, false);
+      finishDistrict();
+      return;
     }
   }
 
@@ -1588,7 +1717,7 @@ function update() {
   if (shake > 0.3) { shake *= 0.9; shx = (Math.random() - 0.5) * shake; shy = (Math.random() - 0.5) * shake; } else { shake = 0; shx = 0; shy = 0; }
   if (flash > 0.01) flash *= 0.9; else flash = 0;
   if (banner.t > 0) banner.t--;
-  if (state === 'paused') { engineUpdate(); return; }
+  if (state === 'paused' || state === 'draft') { engineUpdate(); return; }
   if (state === 'title') {
     cam += 1.2;
     stepWorld(false);
@@ -1615,6 +1744,7 @@ function update() {
     }
     if (--deathTimer <= 0) {
       lives--;
+      livesLost++;
       if (lives <= 0) { state = 'over'; overTimer = 90; saveHi(); }
       else respawn();
     }
@@ -2321,6 +2451,12 @@ function txt(s, x, y, font, color, align, glowColor) {
   ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
 }
 const F_NUM = '700 34px "Saira Condensed", sans-serif';
+// Long banners used to run off both edges of the screen: shrink to fit instead.
+function fitFont(s, size, maxW, family) {
+  ctx.font = '700 ' + size + 'px "' + family + '", sans-serif';
+  const w = ctx.measureText(s).width || 1;
+  return w <= maxW ? size : Math.max(18, Math.floor(size * maxW / w));
+}
 const F_LBL = '600 12px "Saira Condensed", sans-serif';
 
 function drawHud() {
@@ -2330,10 +2466,22 @@ function drawHud() {
   if (state !== 'title') {
     txt('SECTOR ' + sectorNo(), W / 2, 26, F_LBL, 'rgba(232,238,246,0.8)', 'center');
     txt(sectorLabel(), W / 2, 43, '600 11px "Saira Condensed", sans-serif', isBoatMode() ? '#8feaff' : '#ffd37a', 'center');
+    // Objective strip: what this district wants and how far you are.
+    if (mission.id) {
+      const frac = clamp(mission.done / mission.goal, 0, 1);
+      txt((mission.complete ? '✓ ' : '') + mission.label + '  ' + mission.done + '/' + mission.goal,
+        W / 2, 82, '700 11px "Saira Condensed", sans-serif',
+        mission.complete ? '#7dffb0' : 'rgba(232,238,246,0.82)', 'center',
+        mission.complete ? 'rgba(60,220,140,0.5)' : undefined);
+      const mw = 158, mx = (W - mw) / 2, my = 88;
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; rr(mx, my, mw, 4, 2); ctx.fill();
+      ctx.fillStyle = mission.complete ? '#7dffb0' : '#8feaff';
+      rr(mx, my, Math.max(2, mw * frac), 4, 2); ctx.fill();
+    }
   }
 
   txt('LIVES', W - 18, 26, F_LBL, 'rgba(232,238,246,0.65)', 'right');
-  txt('ROCKETS ' + rockets, W - 18, 91, '600 12px "Saira Condensed", sans-serif', rockets ? '#ffd37a' : 'rgba(232,238,246,0.48)', 'right');
+  txt('ROCKETS ' + rockets + (rocketMax > MAX_ROCKETS ? '/' + rocketMax : ''), W - 18, 91, '600 12px "Saira Condensed", sans-serif', rockets ? '#ffd37a' : 'rgba(232,238,246,0.48)', 'right');
   // Shield energy: a meter instead of a count of stored charges.
   const shOn = shieldEnergy > 0, shFrac = clamp(shieldEnergy / SHIELD_MAX, 0, 1);
   txt('SHIELD', W - 18, 108, '600 12px "Saira Condensed", sans-serif', shOn ? '#8feaff' : 'rgba(232,238,246,0.48)', 'right');
@@ -2403,7 +2551,8 @@ function drawHud() {
   if (banner.t > 0 && state !== 'title') {
     const a = Math.min(1, banner.t / 25, (banner.max - banner.t) / 12 + 0.01);
     ctx.globalAlpha = clamp(a, 0, 1);
-    txt(banner.s, W / 2, 210, '700 52px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(0,0,0,0.7)');
+    const bfs = fitFont(banner.s, 52, W - 36, 'Saira Condensed');
+    txt(banner.s, W / 2, 210, '700 ' + bfs + 'px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(0,0,0,0.7)');
     if (banner.sub) txt(banner.sub, W / 2, 238, '500 15px "Saira", sans-serif', '#ffd37a', 'center');
     ctx.globalAlpha = 1;
   }
@@ -2485,13 +2634,82 @@ function drawTitle() {
   ctx.font = '700 76px "Saira Condensed", sans-serif';
   const fs = Math.min(76, Math.floor(76 * 420 / ctx.measureText('RIVERBREAKER').width));
   txt('RIVERBREAKER', W / 2, 222, '700 ' + fs + 'px "Saira Condensed", sans-serif', gr, 'center', 'rgba(255,140,30,0.5)');
-  txt('Fly the river. Break every bridge.', W / 2, 258, '500 17px "Saira", sans-serif', '#e8eef6', 'center');
+  txt('Fly the river. Clear the mission. Break the bridge.', W / 2, 258, '500 17px "Saira", sans-serif', '#e8eef6', 'center');
   drawPlayerJet(W / 2, 470 + Math.sin(t * 0.04) * 6, Math.sin(t * 0.03) * 0.5, 0.6);
   txt('BEST ' + String(hi).padStart(7, '0'), W / 2, 330, '600 16px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.7)', 'center');
+  const st = totalStars();
+  if (st > 0) {
+    starPath(W / 2 - 44, 354, 9);
+    ctx.fillStyle = '#ffd37a'; ctx.fill();
+    txt('STARS ' + st, W / 2 + 10, 359, '700 15px "Saira Condensed", sans-serif', '#ffd37a', 'center');
+  }
   if (blink) txt('PRESS ENTER OR TAP TO START', W / 2, 586, '700 22px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(255,255,255,0.35)');
   txt('Protect homes (-150); dodge rockets; mines sink boats, storms fry jets', W / 2, 622, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
   txt('Shields raise on pickup, drain with every hit and fade with time', W / 2, 644, '400 12px "Saira", sans-serif', 'rgba(150,255,208,0.7)', 'center');
   txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, P pause', W / 2, 666, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
+  ctx.restore();
+}
+
+// Five-pointed star used for the district rating (drawn, so no glyph/font risk).
+function starPath(x, y, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    const rr2 = i % 2 ? r * 0.44 : r;
+    const px = x + Math.cos(a) * rr2, py = y + Math.sin(a) * rr2;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+function drawStar(x, y, r, fill) { starPath(x, y, r); ctx.fillStyle = fill; ctx.fill(); }
+
+// District report + upgrade draft. The run pauses here, the player picks one of
+// three upgrades and the next district starts with a mission of its own.
+const DRAFT_Y0 = 300, DRAFT_CW = 140, DRAFT_CH = 190, DRAFT_GAP = 10;
+function draftCardX(i) { return (W - (DRAFT_CW * 3 + DRAFT_GAP * 2)) / 2 + i * (DRAFT_CW + DRAFT_GAP); }
+function draftCardAt(x, y) {
+  const yy = y - (H - 720) / 2;
+  if (yy < DRAFT_Y0 || yy > DRAFT_Y0 + DRAFT_CH) return -1;
+  for (let i = 0; i < draft.cards.length; i++) {
+    const x0 = draftCardX(i);
+    if (x >= x0 && x <= x0 + DRAFT_CW) return i;
+  }
+  return -1;
+}
+function drawDraft() {
+  panel([]);
+  ctx.fillStyle = 'rgba(3,8,16,0.42)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(0, (H - 720) / 2);
+  txt('SECTOR ' + draft.district + ' CLEARED', W / 2, 142, '700 34px "Saira Condensed", sans-serif', '#ffd37a', 'center', 'rgba(255,150,30,0.45)');
+  for (let i = 0; i < 3; i++) drawStar(W / 2 - 54 + i * 54, 192, 17, i < draft.stars ? '#ffd37a' : 'rgba(255,255,255,0.13)');
+  txt(mission.complete ? 'MISSION COMPLETE  +' + mission.bonus : 'MISSION FAILED',
+    W / 2, 232, '600 14px "Saira", sans-serif', mission.complete ? '#7dffb0' : '#ff8a7a', 'center');
+  txt('SCORE ' + String(score).padStart(7, '0') + '   ·   STARS ' + totalStars(),
+    W / 2, 254, '600 12px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.6)', 'center');
+  txt('CHOOSE ONE UPGRADE', W / 2, 282, '700 12px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.8)', 'center');
+  for (let i = 0; i < draft.cards.length; i++) {
+    const u = draft.cards[i], x = draftCardX(i), y = DRAFT_Y0;
+    ctx.fillStyle = 'rgba(9,16,28,0.94)'; rr(x, y, DRAFT_CW, DRAFT_CH, 12); ctx.fill();
+    ctx.strokeStyle = u.c; ctx.lineWidth = 1.6; ctx.globalAlpha = 0.85;
+    rr(x, y, DRAFT_CW, DRAFT_CH, 12); ctx.stroke();
+    ctx.globalAlpha = 1;
+    glow(u.c === '#8feaff' ? G_CYAN : u.c === '#7dffb0' ? G_GREEN : u.c === '#ff5ad2' ? G_MAG : G_AMBER, x + DRAFT_CW / 2, y + 54, 92, 0.22);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath(); ctx.arc(x + DRAFT_CW / 2, y + 54, 25, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = u.c; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.7;
+    ctx.beginPath(); ctx.arc(x + DRAFT_CW / 2, y + 54, 25, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    txt(u.icon, x + DRAFT_CW / 2, y + 63, '700 26px "Saira Condensed", sans-serif', u.c, 'center');
+    txt(u.name, x + DRAFT_CW / 2, y + 104, '700 14px "Saira Condensed", sans-serif', '#ffffff', 'center');
+    txt(u.desc, x + DRAFT_CW / 2, y + 128, '400 11px "Saira", sans-serif', 'rgba(232,238,246,0.72)', 'center');
+    ctx.fillStyle = 'rgba(255,255,255,0.09)'; rr(x + 16, y + 148, 22, 18, 4); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1; rr(x + 16, y + 148, 22, 18, 4); ctx.stroke();
+    txt(String(i + 1), x + 27, y + 162, '700 12px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.7)', 'center');
+    txt('TAP', x + DRAFT_CW - 26, y + 162, '700 11px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.4)', 'center');
+  }
+  txt('Every district ends with a choice like this', W / 2, 540, '400 11px "Saira", sans-serif', 'rgba(232,238,246,0.45)', 'center');
   ctx.restore();
 }
 
@@ -2526,6 +2744,7 @@ function render() {
   if (state === 'title') { drawTitle(); return; }
   drawHud();
   drawPointers();
+  if (state === 'draft') { drawDraft(); return; }
   const blink = t % 70 < 48;
   if (state === 'over') {
     panel([
@@ -2558,6 +2777,14 @@ function togglePause() {
 }
 window.addEventListener('keydown', e => {
   audio(); keepAwake();
+  if (state === 'draft') {
+    const i = e.code === 'Digit1' || e.code === 'Numpad1' ? 0
+      : e.code === 'Digit2' || e.code === 'Numpad2' ? 1
+      : e.code === 'Digit3' || e.code === 'Numpad3' ? 2 : -1;
+    if (i >= 0) { chooseUpgrade(i); e.preventDefault(); }
+    else if (e.code === 'KeyM') muted = !muted;
+    return;
+  }
   const k = KEYMAP[e.code];
   if (k) { inp[k] = true; if (k !== 'fire') mouse.on = false; e.preventDefault(); }
   if (e.repeat) return;
@@ -2585,6 +2812,11 @@ cv.addEventListener('pointerdown', e => {
   audio(); keepAwake();
   cv.focus();
   const p = toLogical(e);
+  if (state === 'draft') {
+    const i = draftCardAt(p.x, p.y);
+    if (i >= 0) chooseUpgrade(i);
+    return;
+  }
   if (state === 'paused') { togglePause(); return; }
   if (state === 'play' && Math.hypot(p.x - pauseBtn.x, p.y - pauseBtn.y) < pauseBtn.r + 10) { togglePause(); return; }
   tryStart();

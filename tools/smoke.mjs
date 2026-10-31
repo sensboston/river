@@ -52,6 +52,15 @@ window.__rb = {
   get sinkSplash() { return sinkSplash; },
   get deathTimer() { return deathTimer; },
   launchRocket,
+  get mission() { return mission; },
+  get draft() { return draft; },
+  get perks() { return perks; },
+  get rockets() { return rockets; },
+  get lives() { return lives; },
+  get shieldEnergy() { return shieldEnergy; },
+  get cam() { return cam; },
+  get livesLost() { return livesLost; },
+  totalStars, chooseUpgrade, finishDistrict, killEnt, startMission, missionTick,
   get P() { return P; },
   get score() { return score; },
   newGame, respawn, raiseShield, hitPlayer, update, spawnRow,
@@ -437,13 +446,70 @@ for (const mode of ['desktop', 'touch']) {
     assert.ok(['play', 'over'].includes(api.state));
   });
 
+  check(`[${mode}] every district opens with a mission`, () => {
+    api.newGame();
+    assert.ok(['sweep', 'pods', 'mine'].includes(api.mission.id), 'no mission was assigned');
+    assert.ok(api.mission.goal >= 2, 'the mission goal is too small');
+    assert.equal(api.mission.done, 0);
+    assert.equal(api.mission.complete, false);
+  });
+
+  check(`[${mode}] kills advance the mission and complete it`, () => {
+    api.newGame();
+    api.ents.length = 0;
+    assert.equal(api.mission.id, 'sweep');
+    const goal = api.mission.goal;
+    for (let i = 0; i < goal; i++) {
+      const e = { kind: 'boat', x: 120 + i * 10, wy: api.playerWy() + 400, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
+      api.ents.push(e);
+      api.killEnt(e);
+    }
+    assert.equal(api.mission.done, goal);
+    assert.equal(api.mission.complete, true);
+  });
+
+  check(`[${mode}] clearing a district awards stars and opens the draft`, () => {
+    api.newGame();
+    api.invuln = 999;
+    const before = api.totalStars();
+    api.ents.length = 0;
+    api.ents.push({ kind: 'bridge', x: 240, wy: api.playerWy() - 40, w: 480, h: 32, hp: 0, maxHp: 6, flash: 0, dead: true, passed: false });
+    step(1);
+    assert.equal(api.state, 'draft', 'the bridge should end the district');
+    assert.equal(api.draft.cards.length, 3, 'three upgrade cards');
+    const ids = new Set(api.draft.cards.map(c => c.id));
+    assert.equal(ids.size, 3, 'the cards must be distinct');
+    assert.ok(api.draft.stars >= 1, 'at least one star for clearing the district');
+    assert.ok(api.totalStars() > before, 'stars should be persisted');
+  });
+
+  check(`[${mode}] the draft freezes the world until a card is picked`, () => {
+    const cam = api.cam, done = api.mission.done;
+    step(30);
+    assert.equal(api.state, 'draft');
+    assert.equal(api.cam, cam, 'the river must not scroll behind the draft');
+    assert.equal(api.mission.done, done);
+  });
+
+  check(`[${mode}] picking an upgrade resumes play and changes the craft`, () => {
+    const snap = JSON.stringify([api.rockets, api.perks, api.lives, api.shieldEnergy, api.mission.id]);
+    const card = api.draft.cards[0];
+    assert.equal(api.chooseUpgrade(0), true);
+    assert.equal(api.state, 'play');
+    assert.equal(api.draft.cards.length, 0);
+    const after = JSON.stringify([api.rockets, api.perks, api.lives, api.shieldEnergy, api.mission.id]);
+    assert.notEqual(after, snap, 'the chosen upgrade had no effect');
+    assert.ok(card && card.id, 'the card should have an id');
+    assert.equal(api.mission.done, 0, 'the next district starts with a fresh mission');
+  });
+
   check(`[${mode}] long run with restarts stays stable`, () => {
     for (let i = 0; i < 900; i++) {
       if (i % 120 === 0) key('Enter');
       if (i % 7 === 0) key('Space');
       step(1);
     }
-    assert.ok(['play', 'dying', 'sinking', 'over', 'paused', 'title'].includes(api.state));
+    assert.ok(['play', 'dying', 'sinking', 'over', 'paused', 'title', 'draft'].includes(api.state));
   });
 
   check(`[${mode}] pause and resume work`, () => {
