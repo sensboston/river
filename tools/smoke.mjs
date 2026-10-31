@@ -44,6 +44,45 @@ window.__rb = {
   get cam() { return cam; },
   set cam(v) { cam = v; },
   get ents() { return ents; },
+  get weather() { return weather; },
+  get missiles() { return missiles; },
+  get rockets() { return rockets; },
+  set rockets(v) { rockets = v; },
+  get fuelEvery() { return FUEL_EVERY; },
+  get sinkSplash() { return sinkSplash; },
+  get deathTimer() { return deathTimer; },
+  launchRocket,
+  get mission() { return mission; },
+  get draft() { return draft; },
+  get perks() { return perks; },
+  get rockets() { return rockets; },
+  get lives() { return lives; },
+  get shieldEnergy() { return shieldEnergy; },
+  get cam() { return cam; },
+  get livesLost() { return livesLost; },
+  totalStars, chooseUpgrade, finishDistrict, killEnt, startMission, missionTick,
+  get score() { return score; },
+  set score(v) { score = v; },
+  get lives() { return lives; },
+  set lives(v) { lives = v; },
+  get scoreTable() { return scoreTable; },
+  get entry() { return entry; },
+  confirmEntry, entrySetLetter, qualifiesForTable,
+  get revives() { return revives; },
+  set revives(v) { revives = v; },
+  get diffIndex() { return diffIndex; },
+  setDifficulty,
+  themeForSector, themeForRow, themeNow,
+  get dailyRun() { return dailyRun; },
+  setDaily, dailySeed, dailyLabel, beginOver,
+  get dailyBest() { return dailyBest; },
+  get rows() { return rows; },
+  get progress() { return progress; },
+  get runUpgrades() { return runUpgrades; },
+  get runBest() { return runBest; },
+  get tally() { return tally; },
+  get fuel() { return fuel; },
+  get weather() { return weather; },
   get P() { return P; },
   get score() { return score; },
   newGame, respawn, raiseShield, hitPlayer, update, spawnRow,
@@ -320,13 +359,367 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(near.length, 0, `found ${near.length} enemies close to the respawn point`);
   });
 
+  check(`[${mode}] fuel is tight but survivable`, () => {
+    // One barge pass has to fill the tank: a long contact is ~45 frames.
+    api.newGame();
+    api.invuln = 0;
+    api.fuel = 5;
+    api.ents.length = 0;
+    overlapPlayer(api, 'fuel', { x: api.P.x, w: 46, h: 96 });
+    step(45);
+    assert.ok(api.fuel >= 95, `one pass should essentially fill the tank (reached ${Math.round(api.fuel)})`);
+    // And the distance between barges must be shorter than the range of a tank.
+    const rowsPerTank = 100 / 0.055 / 60 * 2.4 * 60 / 8;   // 100 fuel -> frames -> px -> rows
+    assert.ok(api.fuelEvery <= rowsPerTank * 0.8,
+      `barges every ${api.fuelEvery} rows vs ${Math.round(rowsPerTank)} rows of range`);
+  });
+
+  check(`[${mode}] the map generator places minefields`, () => {
+    api.newGame();
+    api.checkpointCam = 30000;
+    api.respawn();
+    step(120);
+    assert.ok(api.ents.some(e => e.kind === 'mine'), 'no mines were generated upstream');
+  });
+
+  check(`[${mode}] boat detonates on a mine`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;           // river patrol
+    api.shieldEnergy = 0;
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'dying');
+  });
+
+  check(`[${mode}] a mine nearly collapses the shield`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;
+    api.raiseShield();
+    api.shieldEnergy = 60;
+    api.shieldHitCd = 0;
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'play', 'the dome absorbs the blast');
+    assert.ok(api.shieldEnergy <= 10, `shield left at ${api.shieldEnergy}`);
+  });
+
+  check(`[${mode}] jet flies over the minefield`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;           // air patrol
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] storm cell charges before it strikes`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;
+    api.shieldEnergy = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'storm', x: api.P.x, wy: api.playerWy(), w: 186, h: 104, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(1);
+    assert.ok(api.weather[0].charge > 0, 'the cell must telegraph the strike');
+    assert.equal(api.state, 'play', 'the flicker itself is harmless');
+    step(30);
+    assert.equal(api.state, 'dying');
+  });
+
+  check(`[${mode}] harmless clouds never hurt the jet`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'cloud', x: api.P.x, wy: api.playerWy(), w: 158, h: 86, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(60);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] boat ignores storm cells`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;
+    api.shieldEnergy = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'storm', x: api.P.x, wy: api.playerWy(), w: 186, h: 104, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(60);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] rocket launch is visible and locks onto a target`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.ents.length = 0;
+    api.rockets = 2;
+    api.ents.push({ kind: 'boat', x: api.P.x + 40, wy: api.playerWy() + 320, w: 84, h: 30, hp: 3, flash: 0, vx: 0, cd: 9999 });
+    assert.equal(api.launchRocket(), true);
+    assert.equal(api.missiles.length, 1);
+    step(4);
+    assert.equal(api.missiles.length, 1, 'the missile should still be flying');
+    assert.notEqual(api.missiles[0].lockX, null, 'the missile should lock onto the boat');
+  });
+
+  check(`[${mode}] running dry sinks the craft and respawns`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.fuel = 0.01;
+    step(1);
+    assert.equal(api.state, 'sinking');
+    step(160);
+    assert.notEqual(api.state, 'sinking');
+    assert.ok(['play', 'over'].includes(api.state));
+  });
+
+  check(`[${mode}] every district opens with a mission`, () => {
+    api.newGame();
+    assert.ok(['sweep', 'pods', 'mine'].includes(api.mission.id), 'no mission was assigned');
+    assert.ok(api.mission.goal >= 2, 'the mission goal is too small');
+    assert.equal(api.mission.done, 0);
+    assert.equal(api.mission.complete, false);
+  });
+
+  check(`[${mode}] kills advance the mission and complete it`, () => {
+    api.newGame();
+    api.ents.length = 0;
+    assert.equal(api.mission.id, 'sweep');
+    const goal = api.mission.goal;
+    for (let i = 0; i < goal; i++) {
+      const e = { kind: 'boat', x: 120 + i * 10, wy: api.playerWy() + 400, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
+      api.ents.push(e);
+      api.killEnt(e);
+    }
+    assert.equal(api.mission.done, goal);
+    assert.equal(api.mission.complete, true);
+  });
+
+  check(`[${mode}] a pod mission is reachable without luck`, () => {
+    api.newGame();
+    api.startMission(3);            // sector 3 is the pod mission
+    assert.equal(api.mission.id, 'pods');
+    api.ents.length = 0;
+    for (let i = 0; i < 6 && !api.mission.complete; i++) {
+      const e = { kind: 'boat', x: 120 + i * 12, wy: api.playerWy() + 400, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
+      api.ents.push(e);
+      api.killEnt(e);
+      if (i === 2) step(1);         // let the pod fall and the player reach it
+    }
+    assert.ok(api.mission.kills >= 2, 'kills should be counted for the pod mission');
+  });
+
+  check(`[${mode}] clearing a district awards stars and opens the draft`, () => {
+    api.newGame();
+    api.invuln = 999;
+    const before = api.totalStars();
+    api.ents.length = 0;
+    api.ents.push({ kind: 'bridge', x: 240, wy: api.playerWy() - 40, w: 480, h: 32, hp: 0, maxHp: 6, flash: 0, dead: true, passed: false });
+    step(1);
+    assert.equal(api.state, 'draft', 'the bridge should end the district');
+    assert.equal(api.draft.cards.length, 3, 'three upgrade cards');
+    const ids = new Set(api.draft.cards.map(c => c.id));
+    assert.equal(ids.size, 3, 'the cards must be distinct');
+    assert.ok(api.draft.stars >= 1, 'at least one star for clearing the district');
+    assert.ok(api.totalStars() > before, 'stars should be persisted');
+  });
+
+  check(`[${mode}] the draft freezes the world until a card is picked`, () => {
+    const cam = api.cam, done = api.mission.done;
+    step(30);
+    assert.equal(api.state, 'draft');
+    assert.equal(api.cam, cam, 'the river must not scroll behind the draft');
+    assert.equal(api.mission.done, done);
+  });
+
+  check(`[${mode}] picking an upgrade resumes play and changes the craft`, () => {
+    const snap = JSON.stringify([api.rockets, api.perks, api.lives, api.shieldEnergy, api.mission.id]);
+    const card = api.draft.cards[0];
+    assert.equal(api.chooseUpgrade(0), true);
+    assert.equal(api.state, 'play');
+    assert.equal(api.draft.cards.length, 0);
+    const after = JSON.stringify([api.rockets, api.perks, api.lives, api.shieldEnergy, api.mission.id]);
+    assert.notEqual(after, snap, 'the chosen upgrade had no effect');
+    assert.ok(card && card.id, 'the card should have an id');
+    assert.equal(api.mission.done, 0, 'the next district starts with a fresh mission');
+  });
+
+  check(`[${mode}] a second wind keeps the run going once`, () => {
+    api.newGame();
+    api.lives = 1;
+    api.revives = 1;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.equal(api.state, 'play', 'the run should continue after the second wind');
+    assert.equal(api.lives, 1, 'back in with one life');
+    assert.equal(api.revives, 0, 'the second wind is spent');
+    api.lives = 1;
+    api.shieldEnergy = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.notEqual(api.state, 'play', 'the next death really ends the run');
+  });
+
+  check(`[${mode}] the first sector is a safe tutorial`, () => {
+    api.newGame();
+    api.shieldEnergy = 100;
+    for (let i = 0; i < 260; i++) { api.invuln = 999; step(1); }
+    assert.equal(api.ents.some(e => e.kind === 'mine'), false, 'no mines in the opening sector');
+    assert.equal(api.weather.some(w => w.kind === 'storm'), false, 'no storms in the opening sector');
+  });
+
+  check(`[${mode}] difficulty changes the pressure`, () => {
+    api.setDifficulty(0);                        // CHILL
+    api.newGame();
+    api.fuel = 60;
+    step(60);
+    const chill = 60 - api.fuel;
+    api.setDifficulty(2);                        // ARCADE
+    api.newGame();
+    api.fuel = 60;
+    step(60);
+    const arcade = 60 - api.fuel;
+    assert.ok(arcade > chill * 1.2, `arcade burn ${arcade.toFixed(2)} should exceed chill ${chill.toFixed(2)}`);
+    assert.equal(api.lives, 2, 'arcade starts with fewer lives');
+    api.setDifficulty(1);                        // back to STANDARD for the rest
+    api.newGame();
+    assert.equal(api.lives, 3);
+  });
+
+  check(`[${mode}] a record run lands on the board without asking for a name`, () => {
+    api.newGame();
+    api.score = 54321;
+    api.lives = 1;
+    api.revives = 0;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    assert.equal(api.state, 'dying');
+    step(130);
+    assert.equal(api.state, 'over', 'the report screen comes straight after the crash');
+    assert.equal(api.scoreTable[0].s, 54321);
+    assert.ok(api.scoreTable.length <= 5, 'the board keeps five entries');
+  });
+
+  check(`[${mode}] a weak run goes straight to game over`, () => {
+    api.newGame();
+    api.score = 0;
+    api.lives = 1;
+    api.revives = 0;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    assert.equal(api.qualifiesForTable(0), false);
+    api.hitPlayer(999);
+    step(130);
+    assert.notEqual(api.state, 'entry');
+  });
+
+  check(`[${mode}] the landscape changes every two sectors`, () => {
+    assert.equal(api.themeForSector(0).id, 'jungle');
+    assert.equal(api.themeForSector(1).id, 'jungle');
+    assert.equal(api.themeForSector(2).id, 'city');
+    assert.equal(api.themeForSector(4).id, 'industry');
+    assert.equal(api.themeForSector(6).id, 'desert');
+    assert.equal(api.themeForSector(8).id, 'jungle', 'the list comes back around');
+    const bridgeRow = 2 * 700;                       // two sectors of jungle, then the city
+    assert.equal(api.themeForRow(bridgeRow - 1).id, 'jungle');
+    assert.equal(api.themeForRow(bridgeRow).id, 'city');
+  });
+
+  check(`[${mode}] every landscape renders without breaking`, () => {
+    for (const sec of [0, 2, 4, 6]) {
+      api.newGame();
+      api.bridgesPassed = sec;
+      api.cam = sec * 700 * 8 + 1200;
+      api.checkpointCam = api.cam;
+      api.respawn();
+      assert.equal(api.themeNow().id, ['jungle', 'city', 'industry', 'desert'][sec / 2]);
+      step(4);
+      assert.equal(api.state, 'play');
+    }
+    api.newGame();
+  });
+
+  check(`[${mode}] the daily seed is the calendar, not the clock`, () => {
+    assert.equal(api.dailySeed(20261031), api.dailySeed(20261031));
+    assert.notEqual(api.dailySeed(20261031), api.dailySeed(20261101));
+    assert.equal(api.dailyLabel(20261031), '31 OCT');
+    assert.equal(api.dailyLabel(20261101), '01 NOV');
+  });
+
+  check(`[${mode}] one daily course for the whole day, different from the usual river`, () => {
+    // Rows 0-39 are the straight opening stretch on every seed: compare further up.
+    const sig = () => { api.ensureRows(220); return api.rows.slice(0, 220).map(r => r.l + ':' + r.r).join(','); };
+    api.setDaily(false);
+    api.newGame();
+    const plain = sig();
+    api.setDaily(true);
+    api.newGame();
+    const day = sig();
+    assert.equal(api.dailyRun, true);
+    assert.notEqual(day, plain, 'the daily course has to differ from the everyday one');
+    api.newGame();
+    assert.equal(sig(), day, 'the same date must rebuild the same course');
+    api.setDaily(false);
+    api.newGame();
+    assert.equal(api.dailyRun, false);
+    assert.equal(sig(), plain, 'switching back restores the everyday river');
+  });
+
+  check(`[${mode}] the last upgrade of a lost run waits for the next one`, () => {
+    api.newGame();
+    api.runUpgrades.length = 0;
+    api.finishDistrict();
+    assert.equal(api.state, 'draft');
+    const id = api.draft.cards[0].id;
+    assert.equal(api.chooseUpgrade(0), true);
+    assert.equal(api.state, 'play');
+    api.score = 0;
+    api.lives = 1;
+    api.revives = 0;
+    api.shieldEnergy = 0;
+    api.shieldHitCd = 0;
+    api.invuln = 0;
+    api.hitPlayer(999);
+    step(130);
+    assert.equal(api.state, 'over');
+    assert.equal(api.progress.vet, id, 'the last upgrade is salvaged');
+    api.newGame();
+    assert.equal(api.progress.vet, '', 'the salvage is spent by the next run');
+    assert.ok(api.runUpgrades.indexOf(id) >= 0, 'the new run starts with it');
+  });
+
+  check(`[${mode}] the report screen counts the score up`, () => {
+    api.newGame();
+    api.score = 4321;
+    api.beginOver(90);
+    step(1);
+    const mid = api.tally.v;
+    assert.ok(mid > 0 && mid < 4321, `the tally should still be running (got ${mid})`);
+    step(90);
+    assert.equal(api.tally.v, 4321);
+    assert.equal(api.state, 'over');
+  });
+
   check(`[${mode}] long run with restarts stays stable`, () => {
     for (let i = 0; i < 900; i++) {
       if (i % 120 === 0) key('Enter');
       if (i % 7 === 0) key('Space');
       step(1);
     }
-    assert.ok(['play', 'dying', 'sinking', 'over', 'paused', 'title'].includes(api.state));
+    assert.ok(['play', 'dying', 'sinking', 'over', 'paused', 'title', 'draft'].includes(api.state));
   });
 
   check(`[${mode}] pause and resume work`, () => {
