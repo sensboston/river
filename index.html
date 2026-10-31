@@ -128,7 +128,7 @@ canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 const W = 480;
 let H = 720;                  // logical height, adapts to the screen in fit()
 const ROW = 8;                // river row height in px
-const PLAYER_OFFSET = 130;    // player distance above the bottom edge
+const PLAYER_OFFSET = 190;    // player distance above the bottom edge: keeps the thumb off the craft
 const BRIDGE_EVERY = 700;     // rows between bridges
 const MAX_LIVES = 4;
 const EXTRA_LIFE_EVERY = 50000;
@@ -145,8 +145,8 @@ const SHIELD_MINE_COST = 55;   // a mine is far more violent than a scrape
 const SHIELD_STORM_COST = 60;  // a lightning strike
 const SINK_DURATION = 150;     // two and a half seconds
 const DEATH_DURATION = 112;    // staged explosion of the wreck before the respawn
-const FUEL_EVERY = 400;       // barges are rare now: missing two in a row runs the tank dry
-const FUEL_RATE = 1.8;        // refuel per frame of contact: one pass tops the tank up
+const FUEL_EVERY = 300;       // one barge every 2400 px: missing two in a row runs the tank dry
+const FUEL_RATE = 4.2;        // refuel per frame of contact: one pass fills the tank
 // Hazards. Spacing values are rows; the offset keeps them off the fuel rows and
 // the bridge approaches.
 const MINE_EVERY = 64;        // anchored mine field spacing (river sectors)
@@ -508,11 +508,116 @@ function makeTree(v) {
   });
 }
 const S_TREES = [makeTree(0), makeTree(1), makeTree(2)];
+// Jungle filler: bushes and boulders break up the wall of identical trees.
+function makeBush(v) {
+  return sprite(30, 28, g => {
+    const sets = v % 2 ? [[15, 15, 10], [9, 18, 7], [21, 18, 7]] : [[14, 16, 9], [20, 16, 7], [13, 9, 7]];
+    for (const c of sets) { g.fillStyle = '#1b4623'; g.beginPath(); g.arc(c[0], c[1] + 2, c[2], 0, 7); g.fill(); }
+    for (const c of sets) {
+      g.fillStyle = rad(g, c[0] - 2, c[1] - 2, 0, c[2], [[0, '#79bd5f'], [1, '#2b6c31']]);
+      g.beginPath(); g.arc(c[0] - 1, c[1] - 1, c[2] * 0.8, 0, 7); g.fill();
+    }
+  });
+}
+function makeRock(v) {
+  return sprite(44, 38, g => {
+    g.fillStyle = 'rgba(5,18,24,.26)'; g.beginPath(); g.ellipse(22, 30, 14, 4, 0, 0, 7); g.fill();
+    const pts = v % 2 ? [[15, 9], [28, 8], [37, 18], [32, 29], [20, 31], [8, 24], [7, 14]]
+      : [[18, 7], [31, 11], [36, 22], [26, 31], [13, 28], [8, 17]];
+    g.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      if (i === 0) g.moveTo(mx, my);
+      g.quadraticCurveTo(a[0], a[1], (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+    }
+    g.closePath();
+    g.fillStyle = rad(g, 17, 13, 0, 24, [[0, '#c0baa6'], [0.55, '#98917e'], [1, '#5d5a50']]); g.fill();
+    g.strokeStyle = 'rgba(250,246,232,.18)'; g.lineWidth = 1.2; g.stroke();
+    g.strokeStyle = 'rgba(60,56,48,.35)'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(16, 15); g.lineTo(23, 19); g.lineTo(21, 26); g.stroke();
+  });
+}
+const S_BUSHES = [makeBush(0), makeBush(1)];
+const S_ROCKS = [makeRock(0), makeRock(1)];
+
+// City: flat roofs seen from above, with a slice of lit facade at the bottom.
+function makeBlock(v) {
+  const pal = [['#39424d', '#5d6874', '#2b333d'], ['#4a4038', '#6f6355', '#3a322c'], ['#334049', '#54636d', '#242f37']][v % 3];
+  return sprite(84, 80, g => {
+    g.fillStyle = 'rgba(5,12,18,.34)'; g.beginPath(); g.ellipse(42, 70, 32, 7, 0, 0, 7); g.fill();
+    g.fillStyle = pal[2]; g.fillRect(11, 44, 62, 22);
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle = (i + v) % 3 === 0 ? 'rgba(255,226,150,.75)' : 'rgba(120,160,190,.35)';
+      g.fillRect(15 + i * 12, 50, 6, 7);
+    }
+    g.fillStyle = pal[0]; rrIn(g, 8, 10, 68, 44, 4); g.fill();
+    g.fillStyle = pal[1]; rrIn(g, 12, 14, 60, 36, 3); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1; rrIn(g, 12, 14, 60, 36, 3); g.stroke();
+    g.fillStyle = '#8d97a2'; g.fillRect(20, 22, 14, 10); g.fillRect(46, 31, 12, 9);
+    g.fillStyle = '#c0cad4'; g.fillRect(20, 22, 14, 3); g.fillRect(46, 31, 12, 3);
+    g.fillStyle = '#6d7782'; g.fillRect(58, 18, 10, 10);
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.4; rrIn(g, 8, 10, 68, 44, 4); g.stroke();
+  });
+}
+// Industry: storage tanks with a rust streak and a pipe to the bank.
+function makeTank(v) {
+  return sprite(64, 64, g => {
+    g.fillStyle = 'rgba(5,12,18,.34)'; g.beginPath(); g.ellipse(32, 54, 25, 6, 0, 0, 7); g.fill();
+    g.strokeStyle = '#4e5a55'; g.lineWidth = 4; g.beginPath(); g.moveTo(32, 50); g.lineTo(32, 62); g.stroke();
+    g.fillStyle = rad(g, 28, 24, 0, 24, [[0, v % 2 ? '#a8b4ad' : '#9fb0b8'], [1, '#57655f']]);
+    g.beginPath(); g.arc(32, 30, 20, 0, 7); g.fill();
+    g.strokeStyle = '#c6d2cb'; g.lineWidth = 1.4; g.beginPath(); g.arc(32, 30, 20, 0, 7); g.stroke();
+    g.strokeStyle = 'rgba(18,28,24,.5)'; g.lineWidth = 1;
+    for (const r of [14, 9, 4.5]) { g.beginPath(); g.arc(32, 30, r, 0, 7); g.stroke(); }
+    g.strokeStyle = 'rgba(190,110,50,.55)'; g.lineWidth = 2.2;
+    g.beginPath(); g.arc(32, 30, 17, 0.35, 1.95); g.stroke();
+    g.fillStyle = '#d8c25a'; g.beginPath(); g.arc(32, 30, 2.6, 0, 7); g.fill();
+  });
+}
+// Industry: a ribbed shed with a hazard-striped door and a chimney.
+function makePlant(v) {
+  return sprite(92, 78, g => {
+    g.fillStyle = 'rgba(5,12,18,.34)'; g.beginPath(); g.ellipse(46, 68, 34, 7, 0, 0, 7); g.fill();
+    g.fillStyle = v % 2 ? '#5a646c' : '#4f585f'; rrIn(g, 8, 22, 76, 38, 3); g.fill();
+    g.fillStyle = '#79858e'; rrIn(g, 8, 22, 76, 11, 3); g.fill();
+    g.strokeStyle = 'rgba(18,26,32,.35)'; g.lineWidth = 1;
+    for (let x = 16; x < 82; x += 10) { g.beginPath(); g.moveTo(x, 33); g.lineTo(x, 58); g.stroke(); }
+    g.fillStyle = '#2b333a'; g.fillRect(34, 42, 22, 17);
+    g.save(); g.beginPath(); g.rect(34, 42, 22, 17); g.clip();
+    for (let i = -18; i < 26; i += 9) {
+      g.fillStyle = '#f0c341';
+      g.beginPath(); g.moveTo(34 + i, 59); g.lineTo(34 + i + 5, 59); g.lineTo(34 + i + 18, 42); g.lineTo(34 + i + 13, 42);
+      g.closePath(); g.fill();
+    }
+    g.restore();
+    g.fillStyle = '#4c565e'; g.fillRect(68, 6, 9, 20);
+    g.fillStyle = '#8a949c'; g.beginPath(); g.ellipse(72.5, 6, 4.5, 2, 0, 0, 7); g.fill();
+  });
+}
+// Desert: cacti and dry rocks.
+function makeCactus(v) {
+  return sprite(40, 48, g => {
+    g.fillStyle = 'rgba(5,18,24,.3)'; g.beginPath(); g.ellipse(20, 43, 11, 4, 0, 0, 7); g.fill();
+    g.fillStyle = '#3f7a46';
+    rrIn(g, 16, 8, 9, 34, 4); g.fill();
+    if (v % 2 === 0) { rrIn(g, 7, 18, 9, 5, 2); g.fill(); rrIn(g, 7, 15, 5, 14, 2); g.fill(); }
+    else { rrIn(g, 25, 24, 8, 5, 2); g.fill(); rrIn(g, 28, 21, 5, 13, 2); g.fill(); }
+    g.strokeStyle = 'rgba(160,225,150,.3)'; g.lineWidth = 1.3; rrIn(g, 16, 8, 9, 34, 4); g.stroke();
+  });
+}
+const S_BLOCKS = [makeBlock(0), makeBlock(1), makeBlock(2)];
+const S_TANKS = [makeTank(0), makeTank(1)];
+const S_PLANTS = [makePlant(0), makePlant(1)];
+const S_CACTI = [makeCactus(0), makeCactus(1)];
 
 // Islands are generated per island and cached
 const islandCache = new Map();
-function makeIsland(key, w, h) {
-  if (islandCache.has(key)) return islandCache.get(key);
+function makeIsland(key, w, h, th) {
+  const cacheKey = key + ':' + (th ? th.id : 'jungle');
+  if (islandCache.has(cacheKey)) return islandCache.get(cacheKey);
+  const deco = th ? th.decor : S_TREES;
+  const decoFits = deco.map(d => (d.w > d.h * 1.6 ? S_TREES[0] : d));
   const m = 24, cw = w + 2 * m, ch = h + 2 * m;
   const s = sprite(cw, ch, g => {
     const cx = cw / 2, cy = ch / 2, N = 22, pts = [];
@@ -530,17 +635,20 @@ function makeIsland(key, w, h) {
     };
     path(1.3); g.fillStyle = 'rgba(120,230,220,0.2)'; g.fill();
     path(1.14); g.fillStyle = 'rgba(150,235,225,0.3)'; g.fill();
-    path(1.05); g.fillStyle = '#d4c293'; g.fill();
-    path(0.92); g.fillStyle = lin(g, 0, 0, cw, ch, [[0, '#4f9d4f'], [1, '#235e2d']]); g.fill();
+    path(1.05); g.fillStyle = th ? th.islandSand : '#d4c293'; g.fill();
+    const land = th ? th.islandLand : ['#4f9d4f', '#235e2d'];
+    path(0.92); g.fillStyle = lin(g, 0, 0, cw, ch, [[0, land[0]], [1, land[1]]]); g.fill();
     const n = Math.max(3, Math.round(w * h / 1700));
     for (let i = 0; i < n; i++) {
       const a = hash(key, 50 + i) * Math.PI * 2, d = 0.15 + hash(key, 70 + i) * 0.55;
       const x = cx + Math.cos(a) * w / 2 * d, y = cy + Math.sin(a) * h / 2 * d;
       const sz = 22 + hash(key, 90 + i) * 12;
-      g.drawImage(S_TREES[i % 3].c, x - sz / 2, y - sz / 2, sz, sz);
+      const dv = decoFits[(i + key) % decoFits.length];
+      const dh = sz * dv.h / dv.w;
+      g.drawImage(dv.c, x - sz / 2, y - dh / 2, sz, dh);
     }
   });
-  islandCache.set(key, s);
+  islandCache.set(cacheKey, s);
   return s;
 }
 
@@ -603,6 +711,125 @@ const PAT_GRASS = makeTile(TILE, (g, S) => {
     });
   }
 });
+// City ground: pavement slabs with joints, drains and a few oil stains.
+const PAT_CITY = makeTile(TILE, (g, S) => {
+  g.fillStyle = '#4a4f52'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 30; i++) {
+    const x = trng() * S, y = trng() * S, r = 26 + trng() * 46;
+    wrapDraw(g, S, x, y, (px, py) => {
+      g.fillStyle = rad(g, px, py, 0, r, [[0, trng() < 0.5 ? 'rgba(96,102,104,0.35)' : 'rgba(40,44,46,0.4)'], [1, 'rgba(0,0,0,0)']]);
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    });
+  }
+  g.strokeStyle = 'rgba(20,24,26,0.55)'; g.lineWidth = 1.6;
+  for (let i = 0; i < 4; i++) {
+    const p = i * S / 4;
+    g.beginPath(); g.moveTo(0, p); g.lineTo(S, p); g.stroke();
+    g.beginPath(); g.moveTo(p, 0); g.lineTo(p, S); g.stroke();
+  }
+  for (let i = 0; i < 380; i++) {
+    g.fillStyle = trng() < 0.5 ? 'rgba(24,28,30,0.4)' : 'rgba(140,144,146,0.3)';
+    g.fillRect(trng() * S, trng() * S, 1.6, 1.6);
+  }
+  for (let i = 0; i < 3; i++) {
+    const x = trng() * S, y = trng() * S, r = 20 + trng() * 26;
+    wrapDraw(g, S, x, y, (px, py) => {
+      g.fillStyle = rad(g, px, py, 0, r, [[0, 'rgba(14,16,18,0.45)'], [1, 'rgba(14,16,18,0)']]);
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    });
+  }
+});
+// Industry ground: cracked concrete, gravel and rust.
+const PAT_YARD = makeTile(TILE, (g, S) => {
+  g.fillStyle = '#5a554c'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 34; i++) {
+    const x = trng() * S, y = trng() * S, r = 24 + trng() * 48;
+    wrapDraw(g, S, x, y, (px, py) => {
+      const c = trng() < 0.5 ? 'rgba(110,104,92,0.3)' : (trng() < 0.5 ? 'rgba(38,34,30,0.4)' : 'rgba(150,90,50,0.16)');
+      g.fillStyle = rad(g, px, py, 0, r, [[0, c], [1, 'rgba(0,0,0,0)']]);
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    });
+  }
+  g.strokeStyle = 'rgba(30,26,22,0.4)'; g.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    let x = trng() * S, y = trng() * S;
+    g.beginPath(); g.moveTo(x, y);
+    for (let j = 0; j < 5; j++) { x += (trng() - 0.5) * 40; y += (trng() - 0.5) * 40; g.lineTo(x, y); }
+    g.stroke();
+  }
+  for (let i = 0; i < 520; i++) {
+    g.fillStyle = trng() < 0.5 ? 'rgba(30,26,22,0.45)' : 'rgba(150,142,124,0.35)';
+    g.fillRect(trng() * S, trng() * S, 1.7, 1.7);
+  }
+});
+// Desert ground: warm sand with dune shading and the odd stone.
+const PAT_SAND = makeTile(TILE, (g, S) => {
+  g.fillStyle = '#c9ab72'; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 40; i++) {
+    const x = trng() * S, y = trng() * S, r = 34 + trng() * 60, light = i % 2 === 0;
+    wrapDraw(g, S, x, y, (px, py) => {
+      g.fillStyle = rad(g, px, py, 0, r, [[0, light ? 'rgba(232,205,150,0.35)' : 'rgba(150,120,74,0.3)'], [1, 'rgba(0,0,0,0)']]);
+      g.fillRect(px - r, py - r, r * 2, r * 2);
+    });
+  }
+  g.strokeStyle = 'rgba(160,130,84,0.32)'; g.lineWidth = 2;
+  for (let i = 0; i < 9; i++) {
+    const y = trng() * S;
+    g.beginPath();
+    for (let x = 0; x <= S; x += 16) g.lineTo(x, y + Math.sin(x * 0.03 + i) * 6);
+    g.stroke();
+  }
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = trng() < 0.5 ? 'rgba(150,120,74,0.4)' : 'rgba(238,222,180,0.4)';
+    g.fillRect(trng() * S, trng() * S, 1.6, 1.6);
+  }
+});
+
+// Landscape themes. The river runs from one kind of country into the next: two
+// sectors of each, in order, then it starts over. Everything a theme changes is
+// data - colours, the bank tile, the decoration sprites - so a new one is a few
+// lines, not a new renderer.
+const THEMES = [
+  {
+    id: 'jungle', name: 'JUNGLE', wash: null, pat: PAT_GRASS,
+    shallow: ['rgba(120,225,215,0.15)', 'rgba(140,235,225,0.2)'],
+    edge: '#cdb98a', foam: 'rgba(255,255,255,0.6)', foamSoft: 'rgba(255,255,255,0.22)',
+    decor: [S_TREES[0], S_TREES[1], S_TREES[2], S_BUSHES[0], S_ROCKS[0], S_BUSHES[1], S_TREES[0]],
+    density: 0.34, minBank: 50, size: [24, 44], shadow: true,
+    maxWidth: 350, islandSand: '#d4c293', islandLand: ['#4f9d4f', '#235e2d']
+  },
+  {
+    id: 'city', name: 'CITY', wash: 'rgba(168,198,210,1)', pat: PAT_CITY,
+    shallow: ['rgba(150,190,205,0.14)', 'rgba(170,205,215,0.18)'],
+    edge: '#9fa5a8', foam: 'rgba(240,250,255,0.5)', foamSoft: 'rgba(240,250,255,0.18)',
+    decor: [S_BLOCKS[0], S_BLOCKS[1], S_BLOCKS[2], S_BLOCKS[0], S_BLOCKS[1], S_BUSHES[0]],
+    density: 0.38, minBank: 86, size: [58, 96], shadow: true,
+    maxWidth: 296, islandSand: '#b6b0a0', islandLand: ['#6d8a5c', '#3c5436']
+  },
+  {
+    id: 'industry', name: 'WORKS', wash: 'rgba(150,158,150,1)', pat: PAT_YARD,
+    shallow: ['rgba(130,140,132,0.16)', 'rgba(150,158,146,0.16)'],
+    edge: '#8d8578', foam: 'rgba(230,228,214,0.36)', foamSoft: 'rgba(220,218,200,0.14)',
+    decor: [S_TANKS[0], S_PLANTS[0], S_TANKS[1], S_PLANTS[1], S_ROCKS[1], S_TANKS[0]],
+    density: 0.33, minBank: 92, size: [48, 88], shadow: true,
+    maxWidth: 312, islandSand: '#a99c86', islandLand: ['#7b7566', '#4a463c']
+  },
+  {
+    id: 'desert', name: 'DESERT', wash: 'rgba(228,208,166,1)', pat: PAT_SAND,
+    shallow: ['rgba(225,205,160,0.16)', 'rgba(235,220,180,0.2)'],
+    edge: '#e2cf9e', foam: 'rgba(255,248,225,0.5)', foamSoft: 'rgba(255,248,225,0.16)',
+    decor: [S_ROCKS[0], S_CACTI[0], S_ROCKS[1], S_CACTI[1], S_CACTI[0], S_ROCKS[0]],
+    density: 0.30, minBank: 52, size: [26, 54], shadow: true,
+    maxWidth: 366, islandSand: '#e4d2a2', islandLand: ['#c0a672', '#8a7043']
+  }
+];
+const SECTORS_PER_THEME = 2;
+function themeForSector(sec) {
+  return THEMES[Math.floor(Math.max(0, sec) / SECTORS_PER_THEME) % THEMES.length];
+}
+function themeForRow(r) { return themeForSector(Math.floor(r / BRIDGE_EVERY)); }
+function themeNow() { return themeForSector(bridgesPassed); }
+
 const S_CLOUD = sprite(260, 150, g => {
   g.scale(1, 0.58);
   g.fillStyle = rad(g, 130, 130, 0, 125, [[0, 'rgba(0,20,40,0.22)'], [1, 'rgba(0,20,40,0)']]);
@@ -662,8 +889,9 @@ let gCenter = W / 2, gWidth = 300, tCenter = W / 2, tWidth = 300, nextChange = 4
 function genRow(r) {
   if (r >= nextChange) {
     const sec = Math.floor(r / BRIDGE_EVERY);
+    const th = themeForSector(sec);
     const minW = Math.max(176, 290 - sec * 14);
-    tWidth = minW + rng() * (350 - minW);
+    tWidth = minW + rng() * (Math.max(minW + 40, th.maxWidth) - minW);
     const half = tWidth / 2 + 28;
     tCenter = half + rng() * (W - 2 * half);
     nextChange = r + 14 + Math.floor(rng() * 28);
@@ -854,6 +1082,9 @@ function setDaily(on) {
 // --- Arcade hi-score table -------------------------------------------------
 // Three letters, five slots, kept between sessions. The oldest hook in the book:
 // you stop playing for points and start playing to get your name on the board.
+// Names are off for now: an automatic entry keeps the board alive without a
+// three-letter prompt. The initials screen still exists behind this switch.
+const ASK_INITIALS = false;
 const SCORES_KEY = 'riverbreakerScores';
 const INITIALS_KEY = 'riverbreakerInitials';
 const ABC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -887,6 +1118,12 @@ function qualifiesForTable(v) {
   return scoreTable.length < 5 || v > scoreTable[scoreTable.length - 1].s;
 }
 const entry = { name: 'AAA', slot: 0, score: 0 };
+function recordRun() {
+  scoreTable.push({ n: lastInitials, s: score, d: sectorNo() });
+  scoreTable.sort((a, b) => b.s - a.s);
+  scoreTable = scoreTable.slice(0, 5);
+  saveScores();
+}
 function startEntry() {
   entry.score = score;
   entry.name = lastInitials;
@@ -1004,7 +1241,11 @@ function chooseUpgrade(i) {
   state = 'play';
   startMission(sectorNo());
   invuln = Math.max(invuln, 70);
-  showBanner('SECTOR ' + sectorNo() + ' · ' + sectorLabel(), 'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal, 150);
+  if (themeForSector(bridgesPassed) !== themeForSector(bridgesPassed - 1)) {
+    showBanner('INTO THE ' + themeNow().name, mission.label.toLowerCase() + ' x' + mission.goal, 170);
+  } else {
+    showBanner('SECTOR ' + sectorNo() + ' · ' + sectorLabel(), 'Mission: ' + mission.label.toLowerCase() + ' x' + mission.goal, 150);
+  }
   return true;
 }
 
@@ -1246,7 +1487,7 @@ function spawnRow(r) {
   } else if (k < 0.91 && rw >= 250) {
     const iw = Math.min(46 + hash(r, 4) * 80, rw - 140);
     const ih = 64 + hash(r, 5) * 60;
-    const img = makeIsland(r, iw, ih);
+    const img = makeIsland(r, iw, ih, themeForRow(r));
     ents.push({ kind: 'island', x: (row.l + row.r) / 2, wy: wy + ih / 2, w: iw * 0.8, h: ih * 0.8, hp: 99, flash: 0, img });
     spawnBlock = r + Math.ceil(ih / ROW) + 3;
   } else {
@@ -1755,7 +1996,7 @@ function updatePlay() {
   if (comboT > 0 && --comboT === 0) combo = 0;
 
   // Fuel
-  fuel -= 0.06 * fuelBurnK() * diff().fuelK;
+  fuel -= 0.055 * fuelBurnK() * diff().fuelK;
   if (fuel < 25 && --lowBeep <= 0) { sfx('low'); lowBeep = 30; }
   if (fuel <= 0) { fuel = 0; sinkPlayer(); return; }
 
@@ -1949,8 +2190,11 @@ function update() {
           // next one, so even a bad run leaves something behind.
           if (runUpgrades.length) { progress.vet = runUpgrades[runUpgrades.length - 1]; saveProgress(); }
           if (dailyRun) saveDaily(score);
-          if (qualifiesForTable(score)) startEntry();
-          else beginOver(90);
+          if (qualifiesForTable(score) && ASK_INITIALS) startEntry();
+          else {
+            if (qualifiesForTable(score)) recordRun();
+            beginOver(90);
+          }
         }
       }
       else respawn();
@@ -1991,6 +2235,20 @@ function paintTiled(pat, ox, oy) {
   ctx.restore();
 }
 
+// Visible rows split by sector. At most two sectors fit on a screen, so a small
+// fixed buffer is enough and the draw path stays allocation free.
+const SEG_BUF = [{ a: 0, b: 0, th: null }, { a: 0, b: 0, th: null }, { a: 0, b: 0, th: null }];
+function splitSegments(r0, r1) {
+  let n = 0;
+  for (let r = r0; r <= r1 && n < SEG_BUF.length;) {
+    const sec = Math.floor(r / BRIDGE_EVERY);
+    const end = Math.min(r1, (sec + 1) * BRIDGE_EVERY - 1);
+    const seg = SEG_BUF[n++];
+    seg.a = r; seg.b = Math.max(r + 1, end); seg.th = themeForSector(sec);
+    r = end + 1;
+  }
+  return n;
+}
 function drawTerrain() {
   ctx.fillStyle = '#126a98';
   ctx.fillRect(-20, -20, W + 40, H + 40);
@@ -2014,41 +2272,67 @@ function drawTerrain() {
   const r1 = Math.floor((cam + H) / ROW) + 4;
   ensureRows(r1 + 1);
 
-  for (const side of [-1, 1]) {
-    // Shallows next to the shore
-    trace(side, r0, r1, false);
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(120,225,215,0.15)'; ctx.lineWidth = 40; ctx.stroke();
-    ctx.strokeStyle = 'rgba(140,235,225,0.2)'; ctx.lineWidth = 20; ctx.stroke();
-    // Bank
+  // The water takes the tint of the country around it. Drawn under the banks, so
+  // only the river changes colour when the landscape does.
+  const thNow = themeNow();
+  if (thNow.wash) {
     ctx.save();
-    trace(side, r0, r1, true);
-    ctx.clip();
-    paintTiled(PAT_GRASS, 0, cam);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = thNow.wash;
+    ctx.fillRect(-20, -20, W + 40, H + 40);
     ctx.restore();
-    // Wet sand and foam
-    trace(side, r0, r1, false);
-    ctx.strokeStyle = '#cdb98a'; ctx.lineWidth = 6; ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2.2;
-    ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 0.35; ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 5; ctx.stroke();
   }
 
-  // Trees
+  // Banks are filled per sector, so the change of landscape happens exactly at a
+  // bridge instead of flipping the whole screen at once. The segment list is
+  // reused every frame: no allocation in the draw path.
+  const segs = SEG_BUF, n = splitSegments(r0, r1);
+  for (const side of [-1, 1]) {
+    // Shallows next to the shore
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < n; i++) {
+      const seg = segs[i];
+      trace(side, seg.a, seg.b, false);
+      ctx.strokeStyle = seg.th.shallow[0]; ctx.lineWidth = 40; ctx.stroke();
+      ctx.strokeStyle = seg.th.shallow[1]; ctx.lineWidth = 20; ctx.stroke();
+    }
+    // Bank
+    for (let i = 0; i < n; i++) {
+      const seg = segs[i];
+      ctx.save();
+      trace(side, seg.a, seg.b, true);
+      ctx.clip();
+      paintTiled(seg.th.pat, 0, cam);
+      ctx.restore();
+    }
+    // Wet edge and foam
+    for (let i = 0; i < n; i++) {
+      const seg = segs[i];
+      trace(side, seg.a, seg.b, false);
+      ctx.strokeStyle = seg.th.edge; ctx.lineWidth = 6; ctx.stroke();
+      ctx.strokeStyle = seg.th.foam; ctx.lineWidth = 2.2;
+      ctx.setLineDash([12, 16]); ctx.lineDashOffset = -t * 0.35; ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = seg.th.foamSoft; ctx.lineWidth = 5; ctx.stroke();
+    }
+  }
+
+  // Bank decoration, one per row at most, chosen by the theme of that row.
   for (let r = r0; r <= r1; r++) {
-    if (hash(r, 11) >= 0.28) continue;
+    const th = themeForRow(r);
+    if (hash(r, 11) >= th.density) continue;
     const side = hash(r, 12) < 0.5 ? -1 : 1;
     const row = rows[r];
     const bankW = side < 0 ? row.l : W - row.r;
-    if (bankW < 50) continue;
+    if (bankW < th.minBank) continue;
     const d = 26 + hash(r, 13) * (bankW - 52);
     const x = side < 0 ? row.l - d : row.r + d;
     const y = rowY(r);
-    const s = S_TREES[Math.floor(hash(r, 14) * 3)];
-    const sz = 26 + hash(r, 15) * 18;
-    drawShadow(s, x, y, 0, sz / 36, 7);
-    ctx.drawImage(s.c, x - sz / 2, y - sz / 2, sz, sz);
+    const sp2 = th.decor[Math.floor(hash(r, 14) * th.decor.length) % th.decor.length];
+    const sz = th.size[0] + hash(r, 15) * (th.size[1] - th.size[0]);
+    const sh2 = sz * sp2.h / sp2.w;
+    if (th.shadow) drawShadow(sp2, x, y, 0, sz / sp2.w, 7);
+    ctx.drawImage(sp2.c, x - sz / 2, y - sh2 / 2, sz, sh2);
   }
 }
 
@@ -2379,10 +2663,12 @@ function drawPlayer() {
 // Pulsing energy dome. It hugs the craft like a canopy: a soft cap, a bright rim,
 // contour rings, meridians, two travelling arcs and a ripple whenever a hit lands.
 // The brighter and steadier it looks, the more energy is left.
+// A closed bubble around the whole craft: the canopy in front and a slightly
+// shorter tail behind it, so the field visibly protects from both sides.
 function shieldPath(rx, ry) {
   ctx.beginPath();
-  ctx.ellipse(0, 0, rx, ry, 0, Math.PI, Math.PI * 2);   // canopy
-  ctx.ellipse(0, 0, rx, ry * 0.22, 0, 0, Math.PI);      // flattened base
+  ctx.ellipse(0, 0, rx, ry, 0, Math.PI, Math.PI * 2);            // front canopy
+  ctx.ellipse(0, 0, rx * 0.94, ry * 0.82, 0, 0, Math.PI);        // rear tail
   ctx.closePath();
 }
 function drawShieldDome(x, y) {
@@ -2413,14 +2699,14 @@ function drawShieldDome(x, y) {
   shieldPath(rx, ry);
   ctx.stroke();
   ctx.shadowBlur = 0;
-  // contour rings
+  // contour rings: full rings now, so the field reads as a bubble
   ctx.strokeStyle = 'rgba(190,248,255,0.6)';
   for (let i = 1; i <= 3; i++) {
     const f = i / 4;
-    ctx.globalAlpha = flick * (0.40 - i * 0.06 + 0.09 * Math.sin(t * 0.18 + i * 1.7));
+    ctx.globalAlpha = flick * (0.34 - i * 0.05 + 0.08 * Math.sin(t * 0.18 + i * 1.7));
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(0, 0, rx * f, ry * f, 0, Math.PI, Math.PI * 2);
+    ctx.ellipse(0, 0, rx * f, ry * f, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
   ctx.globalAlpha = flick;
@@ -2449,11 +2735,11 @@ function drawShieldDome(x, y) {
     shieldPath(rx * (1 + 0.32 * g), ry * (1 + 0.32 * g));
     ctx.stroke();
   }
-  ctx.globalAlpha = flick * (0.35 + 0.2 * k);
-  // waterline where the dome meets the hull
+  ctx.globalAlpha = flick * (0.26 + 0.16 * k);
+  // equator belt where the two halves of the bubble meet
   ctx.strokeStyle = 'rgba(150,240,255,0.85)';
   ctx.lineWidth = 1.4;
-  ctx.beginPath(); ctx.ellipse(0, 0, rx, ry * 0.22, 0, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(0, 0, rx, ry * 0.16, 0, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 
@@ -2676,7 +2962,8 @@ function drawHud() {
   if (state !== 'title') {
     txt('SECTOR ' + sectorNo() + (dailyRun ? ' \u00b7 DAILY' : ''), W / 2, 26, F_LBL,
       dailyRun ? '#8feaff' : 'rgba(232,238,246,0.8)', 'center');
-    txt(sectorLabel(), W / 2, 43, '600 11px "Saira Condensed", sans-serif', isBoatMode() ? '#8feaff' : '#ffd37a', 'center');
+    txt(sectorLabel() + ' \u00b7 ' + themeNow().name, 18, 94, '700 11px "Saira Condensed", sans-serif',
+      isBoatMode() ? '#8feaff' : '#ffd37a', 'left');
     // Objective strip: what this district wants and how far you are.
     if (mission.id) {
       const frac = clamp(mission.done / mission.goal, 0, 1);
@@ -2722,9 +3009,9 @@ function drawHud() {
 
   if (combo > 1 && state !== 'title') {
     const mult = Math.min(8, 1 + Math.floor(combo / 2));
-    txt('COMBO X' + mult, 18, 106, '700 22px "Saira Condensed", sans-serif', '#ffd37a', 'left', 'rgba(255,160,40,0.6)');
-    ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(18, 114, 110, 5, 2.5); ctx.fill();
-    ctx.fillStyle = '#ffb02e'; rr(18, 114, Math.max(4, 110 * comboT / 150), 5, 2.5); ctx.fill();
+    txt('COMBO X' + mult, 18, 128, '700 22px "Saira Condensed", sans-serif', '#ffd37a', 'left', 'rgba(255,160,40,0.6)');
+    ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(18, 136, 110, 5, 2.5); ctx.fill();
+    ctx.fillStyle = '#ffb02e'; rr(18, 136, Math.max(4, 110 * comboT / 150), 5, 2.5); ctx.fill();
   }
 
   // Fuel gauge
@@ -2883,9 +3170,9 @@ function drawTitle() {
   for (let i = 0; i < scoreTable.length; i++) {
     const e = scoreTable[i], y = 380 + i * 17;
     const col = i === 0 ? '#ffd37a' : 'rgba(232,238,246,0.6)';
-    txt((i + 1) + '.', W / 2 - 92, y, '700 12px "Saira Condensed", sans-serif', col, 'left');
-    txt(e.n, W / 2 - 62, y, '700 13px "Saira Condensed", sans-serif', '#ffffff', 'left');
-    txt(String(e.s).padStart(7, '0'), W / 2 + 92, y, '600 12px "Saira Condensed", sans-serif', col, 'right');
+    txt((i + 1) + '.', W / 2 - 86, y, '700 12px "Saira Condensed", sans-serif', col, 'left');
+    if (ASK_INITIALS) txt(e.n, W / 2 - 56, y, '700 13px "Saira Condensed", sans-serif', '#ffffff', 'left');
+    txt(String(e.s).padStart(7, '0'), W / 2 + 86, y, '600 12px "Saira Condensed", sans-serif', col, 'right');
   }
   const st = totalStars();
   if (st > 0) {

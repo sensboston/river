@@ -43,6 +43,25 @@ DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 The report screen counts the final score up, marks a `NEW RECORD`, shows the daily
 best and names the salvaged upgrade.
 
+## Landscape
+
+The river runs from one kind of country into the next, two sectors at a time:
+**JUNGLE** (grass, trees, bushes, boulders) -> **CITY** (asphalt embankments, flat
+roofs, a narrower channel) -> **WORKS** (yards, storage tanks, hazard-striped
+sheds) -> **DESERT** (sand, cacti, dry rocks) -> back to the jungle.
+
+* A theme is data, not code: `THEMES` holds the water tint, the bank tile, the
+  shore colours, the decoration sprites, their density and the river width. A new
+  one is a few lines.
+* The change happens **at a bridge**: banks are filled per sector segment, so the
+  jungle on one side of the bridge and the city on the other are visible in the
+  same frame. The sector banner announces `INTO THE CITY` and the HUD keeps the
+  current landscape on the left.
+* Islands take the land colour and the decoration of their own stretch of river.
+* Bank tiles are baked once at start-up (`PAT_GRASS`, `PAT_CITY`, `PAT_YARD`,
+  `PAT_SAND`) and the segment list is reused every frame: no gradients or
+  allocations in the draw path, which matters on Android.
+
 ## Controls
 
 * Mouse: move to steer, hold the left button to fire, right button or `V` for a rocket.
@@ -51,6 +70,9 @@ best and names the salvaged upgrade.
 
 Shields are automatic: a shield pod raises the dome at once, and the dome drains
 with time and with every hit it absorbs. When the meter is empty the next hit hurts.
+The dome is a full bubble around the craft and absorbs hits from any direction, so
+it also covers the tail. The craft sits 190 px above the bottom edge, clear of the
+holding thumb on a phone.
 
 ## Progression
 
@@ -64,15 +86,18 @@ The river is a chain of sectors, not an endless scroller:
   stars are stored in `localStorage`, so progress survives between sessions;
 * sector difficulty scales: enemy density, mine fields and storm frequency all grow
   with the sector number;
-* a qualifying score ends the run on the arcade **initials screen**: three letters,
-  five slots, best scores shown on the title screen between sessions.
+* a qualifying score goes straight onto the top-five board (best runs shown on the
+  title screen between sessions). The three-letter prompt still exists behind
+  `ASK_INITIALS` for a future settings screen, but it is off by default.
 
 The draft screen is deliberately the only place a full-screen ad could go: it is a
 natural pause between missions, never mid-run.
 
 ## Hazards
 
-* **Fuel barges** are rare: one every 400 rows, so the tank has to be managed.
+* **Fuel barges**: one every 300 rows (2400 px) against roughly 4400 px of range,
+  so the tank has to be managed but a missed barge is not a death sentence. A
+  single pass with the hose down fills the tank.
 * **Mines** are anchored in the river. The patrol boat detonates on contact, the
   jet flies over them. They also detonate when shot, and the blast sets off the
   neighbouring mines.
@@ -106,7 +131,8 @@ air and water collision layers, shield energy, refuelling, respawn safety, mines
 storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
 upgrade draft, star persistence, the initials/hi-score flow, difficulty scaling,
 the tutorial sector, the second wind, the daily seed and course, the salvage on
-death and the score tally (74 checks).
+death, the score tally, the landscape theme table and a render pass in all four
+themes (78 checks).
 
 ## Deployment
 

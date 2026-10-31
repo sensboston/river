@@ -72,6 +72,7 @@ window.__rb = {
   set revives(v) { revives = v; },
   get diffIndex() { return diffIndex; },
   setDifficulty,
+  themeForSector, themeForRow, themeNow,
   get dailyRun() { return dailyRun; },
   setDaily, dailySeed, dailyLabel, beginOver,
   get dailyBest() { return dailyBest; },
@@ -358,8 +359,19 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(near.length, 0, `found ${near.length} enemies close to the respawn point`);
   });
 
-  check(`[${mode}] fuel barges stay rare`, () => {
-    assert.ok(api.fuelEvery >= 380, `barges every ${api.fuelEvery} rows is too generous`);
+  check(`[${mode}] fuel is tight but survivable`, () => {
+    // One barge pass has to fill the tank: a long contact is ~45 frames.
+    api.newGame();
+    api.invuln = 0;
+    api.fuel = 5;
+    api.ents.length = 0;
+    overlapPlayer(api, 'fuel', { x: api.P.x, w: 46, h: 96 });
+    step(45);
+    assert.ok(api.fuel >= 95, `one pass should essentially fill the tank (reached ${Math.round(api.fuel)})`);
+    // And the distance between barges must be shorter than the range of a tank.
+    const rowsPerTank = 100 / 0.055 / 60 * 2.4 * 60 / 8;   // 100 fuel -> frames -> px -> rows
+    assert.ok(api.fuelEvery <= rowsPerTank * 0.8,
+      `barges every ${api.fuelEvery} rows vs ${Math.round(rowsPerTank)} rows of range`);
   });
 
   check(`[${mode}] the map generator places minefields`, () => {
@@ -584,7 +596,7 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(api.lives, 3);
   });
 
-  check(`[${mode}] a record run asks for initials and reaches the board`, () => {
+  check(`[${mode}] a record run lands on the board without asking for a name`, () => {
     api.newGame();
     api.score = 54321;
     api.lives = 1;
@@ -595,15 +607,8 @@ for (const mode of ['desktop', 'touch']) {
     api.hitPlayer(999);
     assert.equal(api.state, 'dying');
     step(130);
-    assert.equal(api.state, 'entry', 'a top score should open the initials screen');
-    api.entrySetLetter(0, 1);          // A -> B
-    api.entrySetLetter(1, 25);         // A -> Z
-    assert.equal(api.entry.name[0], 'B');
-    assert.equal(api.entry.name[1], 'Z');
-    assert.equal(api.confirmEntry(), true);
-    assert.equal(api.state, 'over');
+    assert.equal(api.state, 'over', 'the report screen comes straight after the crash');
     assert.equal(api.scoreTable[0].s, 54321);
-    assert.equal(api.scoreTable[0].n[0], 'B');
     assert.ok(api.scoreTable.length <= 5, 'the board keeps five entries');
   });
 
@@ -619,6 +624,32 @@ for (const mode of ['desktop', 'touch']) {
     api.hitPlayer(999);
     step(130);
     assert.notEqual(api.state, 'entry');
+  });
+
+  check(`[${mode}] the landscape changes every two sectors`, () => {
+    assert.equal(api.themeForSector(0).id, 'jungle');
+    assert.equal(api.themeForSector(1).id, 'jungle');
+    assert.equal(api.themeForSector(2).id, 'city');
+    assert.equal(api.themeForSector(4).id, 'industry');
+    assert.equal(api.themeForSector(6).id, 'desert');
+    assert.equal(api.themeForSector(8).id, 'jungle', 'the list comes back around');
+    const bridgeRow = 2 * 700;                       // two sectors of jungle, then the city
+    assert.equal(api.themeForRow(bridgeRow - 1).id, 'jungle');
+    assert.equal(api.themeForRow(bridgeRow).id, 'city');
+  });
+
+  check(`[${mode}] every landscape renders without breaking`, () => {
+    for (const sec of [0, 2, 4, 6]) {
+      api.newGame();
+      api.bridgesPassed = sec;
+      api.cam = sec * 700 * 8 + 1200;
+      api.checkpointCam = api.cam;
+      api.respawn();
+      assert.equal(api.themeNow().id, ['jungle', 'city', 'industry', 'desert'][sec / 2]);
+      step(4);
+      assert.equal(api.state, 'play');
+    }
+    api.newGame();
   });
 
   check(`[${mode}] the daily seed is the calendar, not the clock`, () => {
