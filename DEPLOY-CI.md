@@ -5,7 +5,7 @@ Two GitHub Actions workflows live in `.github/workflows/`:
 | Workflow | Trigger | What it does | Secrets |
 | --- | --- | --- | --- |
 | `ci.yml` | every pull request, every non-master branch | static checks, headless smoke test, build, artifact | none |
-| `deploy.yml` | push to `master`, manual run | same checks, then build → approval → rsync over SSH → live check | `DEPLOY_SSH_KEY` |
+| `deploy.yml` | **manual run only** (Actions → Deploy → Run workflow) | same checks, then build → approval → rsync over SSH → live check | `DEPLOY_SSH_KEY` |
 
 Nothing is compiled and there are no npm dependencies: the site is plain static
 files. The "build" step (`tools/build.mjs`) copies an explicit allowlist of files
@@ -152,22 +152,41 @@ Only the `deploy` job of `deploy.yml` reads it, and that workflow has no
 
 ## 3. Everyday flow
 
+Publishing is **manual**. `deploy.yml` has no `push` trigger, so merging a pull
+request into `master` deploys nothing; the files go out by hand (section 5) or by
+starting the workflow yourself.
+
 1. Open a pull request. `ci.yml` runs the checks, the smoke test and the build;
    the workflow fails if `index.html` does not parse, if the manifest references a
    missing icon, if `sw.js` precaches a file that does not exist, or if a gameplay
    rule regresses (see below).
-2. Merge to `master`. `deploy.yml` verifies again, builds `dist/`, waits for the
-   approval on the `production` environment, then:
+2. Merge when it is green.
+3. To publish, either follow section 5, or — after sections 1 and 2 are done —
+   start **Actions → Deploy → Run workflow** and approve the `production`
+   environment.
 
-   ```
-   rsync -rlptz --checksum --delete --delay-updates dist/ deploy@senssoft.com:/var/www/html/river/
-   ```
+If you later want push-to-deploy, add the trigger back to `deploy.yml`:
 
-   `--delay-updates` renames each file into place at the end of the transfer; the
-   site is never served a truncated file. `--delete` removes leftovers so the
-   folder matches the build exactly.
-3. The last step fetches the live site and fails the workflow unless the new
-   commit id is visible in `https://senssoft.com/river/sw.js`.
+```yaml
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      ref: ...
+```
+
+The run then verifies again, builds `dist/`, waits for the approval on the
+`production` environment, and:
+
+```bash
+rsync -rlptz --checksum --delete --delay-updates dist/ deploy@senssoft.com:/var/www/html/river/
+```
+
+`--delay-updates` renames each file into place at the end of the transfer; the
+site is never served a truncated file. `--delete` removes leftovers so the folder
+matches the build exactly. The last step of the workflow fetches the live site and
+fails unless the new commit id is visible in `https://senssoft.com/river/sw.js`.
 
 `dist/version.json` records `{version, commit, builtAt}` for the deployed build.
 

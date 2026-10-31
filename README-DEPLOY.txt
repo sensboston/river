@@ -48,21 +48,23 @@ Check after deploy
   Open https://senssoft.com/river/ once with internet, wait a few seconds,
   then switch off the network and reload. The game must still start.
 
-Release a new version (automatic, recommended)
+Release a new version (manual publishing)
   1. Open a pull request. CI runs: node tools/check.mjs (structure, manifest,
      service worker, assets), node tools/smoke.mjs (headless gameplay test)
-     and node tools/build.mjs (build into dist/).
-  2. Merge to master. The Deploy workflow rebuilds, waits for the approval of
-     the "production" environment, rsyncs dist/ over SSH and checks the live
-     site. The cache version in sw.js is stamped with the commit id, so every
-     player picks up the new build on the next launch.
-  See DEPLOY-CI.md for the one-time server and GitHub setup.
+     and node tools/build.mjs (build into dist/). Merge when it is green.
+  2. Build and upload by hand:
+       node tools/build.mjs
+       rsync -rlptz --checksum --delete --delay-updates dist/ user@host:/var/www/html/river/
+     The build stamps sw.js with the commit id, so every player picks up the
+     new version on the next launch.
+  3. Copying the files without the build also works, but then bump VERSION in
+     sw.js yourself (for example riverbreaker-v5), otherwise installed copies
+     keep serving the old cache.
+  4. Optional: the Deploy workflow does all of this over a restricted SSH key,
+     but only when started manually (Actions -> Deploy -> Run workflow).
+     Setup: DEPLOY-CI.md, Oracle Cloud: DEPLOY-ORACLE-UBUNTU.md.
 
-Release by hand (fallback)
-  1. Change files.
-  2. Change VERSION in sw.js (for example riverbreaker-v5).
-  3. Upload. Players get the new version on the next launch.
-  The same checks run locally with:
+  The same checks run locally:
      node tools/check.mjs && node tools/smoke.mjs && node tools/build.mjs
 
 Notes

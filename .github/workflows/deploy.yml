@@ -1,11 +1,15 @@
 name: Deploy
 
-# Only a push to master (or a manual run) can deploy. Pull requests never reach
-# this workflow, so a PR author cannot get anywhere near the deploy key even if
-# the workflow file is edited in the PR.
+# Manual only on purpose: merging a pull request to master must not publish
+# anything. Start this workflow by hand when you actually want to deploy.
+#
+# Pull requests never reach this workflow, so a PR author cannot get anywhere
+# near the deploy key even if the workflow file is edited in the PR.
+#
+# To go back to push-to-deploy, add the trigger:
+#   push:
+#     branches: [master]
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
     inputs:
       ref:

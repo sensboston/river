@@ -47,9 +47,11 @@ air and water collision layers, shield energy, refuelling, respawn safety.
 
 ## Deployment
 
-Pushing to `master` runs the checks, builds `dist/`, waits for the approval of the
-`production` environment and rsyncs the result to the web server over a
-restricted SSH key. Pull requests only run the checks and never see secrets.
+Pull requests run the checks, the smoke test and the build. Publishing is manual:
+`node tools/build.mjs`, then rsync `dist/` to the server (see
+[README-DEPLOY.txt](README-DEPLOY.txt)). The optional `Deploy` workflow does the
+same thing automatically, but only when you start it by hand — merging to `master`
+never deploys anything.
 
 Full setup, rollback and security notes: **[DEPLOY-CI.md](DEPLOY-CI.md)**.
 Oracle Cloud Ubuntu instance (Always Free / PAYG): **[DEPLOY-ORACLE-UBUNTU.md](DEPLOY-ORACLE-UBUNTU.md)**.
