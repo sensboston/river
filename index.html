@@ -766,7 +766,7 @@ function startMission(d) {
   const id = missionFor(d), k = MISSION_KINDS[id];
   mission = {
     id, label: k.label, goal: Math.min(24, Math.round(k.base + (d - 1) * k.step)),
-    done: 0, complete: false, bonus: k.bonus + d * 100
+    done: 0, kills: 0, complete: false, bonus: k.bonus + d * 100
   };
   livesLost = 0;
 }
@@ -1387,7 +1387,11 @@ function killEnt(e) {
     e.removed = true;
     boom(e.x, e.wy, e.kind === 'fuel' ? 1.8 : 1.2);
     sfx('boom');
-    if (e.kind !== 'fuel' && e.kind !== 'house' && Math.random() < 0.25) {
+    // A "collect power-ups" mission must not depend on luck: while it is active
+    // every second kill drops a pod.
+    mission.kills = (mission.kills || 0) + 1;
+    const forcePod = mission.id === 'pods' && !mission.complete && mission.kills % 2 === 0;
+    if (e.kind !== 'fuel' && e.kind !== 'house' && (forcePod || Math.random() < 0.25)) {
       const kinds = ['spread', 'rapid', 'shield', 'rocket', 'nova'];
       pods.push({ kind: kinds[Math.floor(Math.random() * kinds.length)], x: e.x, wy: e.wy, born: t });
     }

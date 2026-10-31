@@ -468,6 +468,20 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(api.mission.complete, true);
   });
 
+  check(`[${mode}] a pod mission is reachable without luck`, () => {
+    api.newGame();
+    api.startMission(3);            // sector 3 is the pod mission
+    assert.equal(api.mission.id, 'pods');
+    api.ents.length = 0;
+    for (let i = 0; i < 6 && !api.mission.complete; i++) {
+      const e = { kind: 'boat', x: 120 + i * 12, wy: api.playerWy() + 400, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
+      api.ents.push(e);
+      api.killEnt(e);
+      if (i === 2) step(1);         // let the pod fall and the player reach it
+    }
+    assert.ok(api.mission.kills >= 2, 'kills should be counted for the pod mission');
+  });
+
   check(`[${mode}] clearing a district awards stars and opens the draft`, () => {
     api.newGame();
     api.invuln = 999;
