@@ -18,12 +18,26 @@ DEPLOY-ORACLE-UBUNTU.md  step-by-step server setup on Oracle Cloud Ubuntu
 
 ## Controls
 
-* Mouse: move to steer, hold the left button to fire, `V` for a rocket.
+* Mouse: move to steer, hold the left button to fire, right button or `V` for a rocket.
 * Keyboard: arrows or `WASD`, `Space` to fire, `V` rocket, `P` pause, `M` sound.
 * Touch: drag to steer (drag up/down for faster/slower), hold **FIRE**, tap **ROCKET**.
 
 Shields are automatic: a shield pod raises the dome at once, and the dome drains
 with time and with every hit it absorbs. When the meter is empty the next hit hurts.
+
+## Hazards
+
+* **Fuel barges** are rare: one every 400 rows, so the tank has to be managed.
+* **Mines** are anchored in the river. The patrol boat detonates on contact, the
+  jet flies over them. They also detonate when shot, and the blast sets off the
+  neighbouring mines.
+* **Clouds** are harmless scenery. **Storm cells** are dark and deadly: flying into
+  the core starts a charge, the cell flickers for a fifth of a second and then
+  drops a lightning bolt. Leave the core in time and the strike fizzles.
+* Losing all fuel is a sequence, not an instant: the boat ships water and rolls
+  under, the jet glides down, ditches and floats hull-deep before it sinks.
+* A destroyed craft breaks up: staged explosions, a burning wreck and a smoke
+  column, then the respawn.
 
 ## Local development
 
@@ -43,7 +57,8 @@ node tools/build.mjs     # writes dist/ and stamps sw.js with the commit id
 
 `tools/smoke.mjs` executes the game script against stubbed DOM/Canvas/Audio
 objects, drives thousands of frames and asserts the rules that are easy to break:
-air and water collision layers, shield energy, refuelling, respawn safety.
+air and water collision layers, shield energy, refuelling, respawn safety, mines,
+storm cells, the rocket lock and the out-of-fuel sequence.
 
 ## Deployment
 

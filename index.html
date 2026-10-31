@@ -115,7 +115,7 @@ canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
   <div class="view" id="view">
     <canvas id="game" tabindex="0" aria-label="Riverbreaker game"></canvas>
   </div>
-  <p class="hint hint-key"><kbd>Mouse</kbd> move and hold left button to fire; <kbd>V</kbd> rocket. Or <kbd>Arrows</kbd>/<kbd>WASD</kbd>, <kbd>Space</kbd> fire - <kbd>P</kbd> pause - <kbd>M</kbd> sound. Shields raise by themselves.</p>
+  <p class="hint hint-key"><kbd>Mouse</kbd> move and hold left button to fire; right button or <kbd>V</kbd> rocket. Or <kbd>Arrows</kbd>/<kbd>WASD</kbd>, <kbd>Space</kbd> fire - <kbd>P</kbd> pause - <kbd>M</kbd> sound. Shields raise by themselves.</p>
   <p class="hint hint-touch">Drag to steer and adjust speed. Hold FIRE to shoot; tap ROCKET to launch. Shields raise by themselves when you grab one.</p>
   <p class="hint" id="iosHint" hidden>To install on iPhone: tap Share, then Add to Home Screen.</p>
 </div>
@@ -141,8 +141,19 @@ const SHIELD_DRAIN = 0.22;     // energy lost per frame while the dome is up (~7
 const SHIELD_BULLET_COST = 16; // enemy bullet absorbed by the dome
 const SHIELD_ROCKET_COST = 28; // enemy rocket absorbed by the dome
 const SHIELD_CRASH_COST = 32;  // ramming an enemy or a bank
+const SHIELD_MINE_COST = 55;   // a mine is far more violent than a scrape
+const SHIELD_STORM_COST = 60;  // a lightning strike
 const SINK_DURATION = 150;     // two and a half seconds
-const FUEL_EVERY = 160;       // between the strict original and the easy prototype
+const DEATH_DURATION = 112;    // staged explosion of the wreck before the respawn
+const FUEL_EVERY = 400;       // barges are rare now: missing two in a row runs the tank dry
+const FUEL_RATE = 1.8;        // refuel per frame of contact: one pass tops the tank up
+// Hazards. Spacing values are rows; the offset keeps them off the fuel rows and
+// the bridge approaches.
+const MINE_EVERY = 64;        // anchored mine field spacing (river sectors)
+const MINE_ROW = 37;
+const STORM_EVERY = 88;       // cloud cell spacing (air sectors)
+const STORM_ROW = 47;
+const STORM_CHARGE = 20;      // frames between entering a storm core and the bolt
 const STEP = 1000 / 60;       // fixed update step in ms
 let PLAYER_SY = H - PLAYER_OFFSET;
 
@@ -209,6 +220,17 @@ function shadowOf(s) {
   g.drawImage(s.c, 0, 0);
   g.globalCompositeOperation = 'source-in';
   g.fillStyle = '#021424';
+  g.fillRect(0, 0, c.width, c.height);
+  return { c, w: s.w, h: s.h, sh: null };
+}
+// A charred copy of a sprite keeps its highlights but reads as burnt metal.
+function charSprite(s) {
+  const c = document.createElement('canvas');
+  c.width = s.c.width; c.height = s.c.height;
+  const g = c.getContext('2d');
+  g.drawImage(s.c, 0, 0);
+  g.globalCompositeOperation = 'source-atop';
+  g.fillStyle = 'rgba(22,17,15,0.66)';
   g.fillRect(0, 0, c.width, c.height);
   return { c, w: s.w, h: s.h, sh: null };
 }
@@ -586,6 +608,45 @@ const S_CLOUD = sprite(260, 150, g => {
   g.fillStyle = rad(g, 130, 130, 0, 125, [[0, 'rgba(0,20,40,0.22)'], [1, 'rgba(0,20,40,0)']]);
   g.fillRect(0, 0, 260, 260);
 });
+// Weather sprites are baked once so the per-frame cost stays a few drawImage
+// calls: important for the Android build, where gradient fills are expensive.
+function cloudSprite(w, h, stops, blobs) {
+  return sprite(w, h, g => {
+    for (const b of blobs) {
+      const cx = b[0] * w, cy = b[1] * h, r = b[2] * w;
+      g.fillStyle = rad(g, cx, cy, 0, r, stops);
+      g.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+  });
+}
+// Blob centres and radii stay inside the sprite box: anything that spills over the
+// edge would be clipped into a hard straight line.
+const CLOUD_BLOBS = [[0.30, 0.52, 0.29], [0.50, 0.40, 0.29], [0.70, 0.50, 0.29],
+  [0.40, 0.66, 0.27], [0.62, 0.68, 0.25], [0.80, 0.64, 0.18], [0.20, 0.64, 0.17]];
+const S_CLOUD_SOFT = cloudSprite(190, 104, [
+  [0, 'rgba(246,253,255,0.98)'], [0.4, 'rgba(226,243,254,0.66)'], [0.75, 'rgba(214,236,250,0.26)'], [1, 'rgba(210,234,250,0)']
+], CLOUD_BLOBS);
+// A storm cell is built in two passes: a grey-blue body and a heavy dark underside,
+// so it reads as weather rather than as an ink blot on the water.
+const S_CLOUD_STORM = sprite(200, 118, g => {
+  const body = [[0, 'rgba(152,164,194,0.95)'], [0.45, 'rgba(110,120,152,0.84)'], [0.8, 'rgba(80,88,116,0.3)'], [1, 'rgba(70,78,104,0)']];
+  for (const b of CLOUD_BLOBS) {
+    const cx = b[0] * 200, cy = b[1] * 118, r = b[2] * 200;
+    g.fillStyle = rad(g, cx, cy, 0, r, body);
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  const belly = [[0, 'rgba(26,30,46,0.82)'], [0.55, 'rgba(32,36,56,0.44)'], [1, 'rgba(36,40,60,0)']];
+  for (const b of [[0.34, 0.62, 0.27], [0.54, 0.66, 0.25], [0.72, 0.60, 0.21], [0.22, 0.58, 0.18], [0.46, 0.54, 0.20]]) {
+    const cx = b[0] * 200, cy = b[1] * 118, r = b[2] * 200;
+    g.fillStyle = rad(g, cx, cy, 0, r, belly);
+    g.fillRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  // a soft top highlight sells the volume
+  const hl = 0.34 * 200, hy = 0.32 * 118, hr = 0.24 * 200;
+  g.fillStyle = rad(g, hl, hy, 0, hr, [[0, 'rgba(226,236,255,0.3)'], [1, 'rgba(226,236,255,0)']]);
+  g.fillRect(hl - hr, hy - hr, hr * 2, hr * 2);
+});
+
 const S_VIGNETTE = sprite(W, H, g => {
   g.fillStyle = rad(g, W / 2, H * 0.55, H * 0.28, H * 0.78, [[0, 'rgba(0,10,25,0)'], [1, 'rgba(0,10,25,0.5)']]);
   g.fillRect(0, 0, W, H);
@@ -639,7 +700,11 @@ let shake = 0, shx = 0, shy = 0, flash = 0;
 let refueling = false;
 const banner = { s: '', sub: '', t: 0, max: 150 };
 const P = { x: W / 2, vx: 0, bank: 0 };
+const S_PLAYER_CHAR = charSprite(S_PLAYER);
+const S_PLAYER_BOAT_CHAR = charSprite(S_PLAYER_BOAT);
 let ents = [], bullets = [], ebul = [], missiles = [], enemyRockets = [], parts = [], pods = [], pops = [];
+let weather = [];          // harmless cloud layer + storm cells (air sectors only)
+let sinkSplash = false;    // the jet has already hit the water in the sinking sequence
 const inp = { left: false, right: false, up: false, down: false, fire: false };
 const touch = { active: false, pointerId: null, fire: false, firePointerId: null, sx: 0, sy: 0, cx: 0, cy: 0, bx: 0, targetX: W / 2, fast: false, slow: false };
 const mouse = { on: false, x: W / 2, y: H / 2, fire: false, inside: false };
@@ -711,6 +776,10 @@ function sfx(name) {
   else if (name === 'shield') tone(240, 900, 0.25, 'sine', 0.06);
   else if (name === 'shieldhit') { tone(880, 520, 0.09, 'triangle', 0.05); tone(1320, 900, 0.06, 'sine', 0.03, 0.01); }
   else if (name === 'shielddown') { tone(460, 110, 0.32, 'triangle', 0.055); noise(0.18, 0.06, 900); }
+  else if (name === 'rocket') { noise(0.36, 0.22, 1700); tone(170, 760, 0.26, 'sawtooth', 0.05); }
+  else if (name === 'minehit') { noise(0.85, 0.44, 620); tone(120, 42, 0.42, 'sine', 0.06); }
+  else if (name === 'thunderwarn') { tone(74, 58, 0.5, 'sawtooth', 0.035); noise(0.4, 0.1, 260); }
+  else if (name === 'thunder') { noise(0.8, 0.42, 420); tone(56, 32, 0.62, 'sine', 0.06); }
 }
 function startEngine() {
   const a = audio();
@@ -850,6 +919,31 @@ function spawnRow(r) {
     const lx = side < 0 ? row.l - 17 : row.r + 17;
     ents.push({ kind: 'launcher', x: lx, wy, w: 46, h: 38, hp: 3, flash: 0, side, charge: 0, cd: 130 + hash(r, 46) * 90 });
   }
+  // Weather cells. Air sectors get a harmless translucent cloud layer plus, higher
+  // up the river, dark storm cells. A storm only strikes after a visible flicker,
+  // so it never kills out of nowhere.
+  if (sec % 2 === 0 && r > 30 && r % STORM_EVERY === STORM_ROW) {
+    const storm = r > 300 && hash(r, 61) < 0.42;
+    weather.push({
+      kind: storm ? 'storm' : 'cloud',
+      x: 70 + hash(r, 62) * (W - 140), wy: wy + 26,
+      w: storm ? 186 : 158, h: storm ? 104 : 86,
+      drift: (hash(r, 63) - 0.5) * 0.3, ph: hash(r, 64) * 6.283,
+      charge: 0, struck: false, fade: 0, bolt: 0
+    });
+  }
+  // Anchored mines: the patrol boat detonates on them, the jet flies over them.
+  // They are placed only in the navigable part of the row, never on the banks.
+  if (r > 90 && r % MINE_EVERY === MINE_ROW) {
+    const n = 1 + (hash(r, 71) < 0.34 ? 1 : 0) + (hash(r, 72) < 0.16 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      ents.push({
+        kind: 'mine', x: row.l + 54 + hash(r, 73 + i) * Math.max(24, rw - 108),
+        wy: wy + (hash(r, 76 + i) - 0.5) * 26,
+        w: 30, h: 30, hp: 1, flash: 0, ph: hash(r, 79 + i) * 6.283
+      });
+    }
+  }
   if (r % 6 !== 3) return;
   if (hash(r, 1) > Math.min(0.82, 0.46 + sec * 0.045)) return;
   const k = hash(r, 2), dir = hash(r, 6) < 0.5 ? -1 : 1;
@@ -946,6 +1040,13 @@ function stepWorld(live) {
   }
   ents = ents.filter(e => !e.removed && e.wy > cam - 90 && e.x > -90 && e.x < W + 90);
   pods = pods.filter(p => p.wy > cam - 60);
+  for (const w of weather) {
+    w.x += w.drift;
+    if (w.bolt > 0) w.bolt--;
+    if (w.kind === 'storm' && w.struck) w.fade++;
+  }
+  weather = weather.filter(w => w.wy > cam - 150 && w.x > -280 && w.x < W + 280 &&
+    !(w.kind === 'storm' && w.struck && w.fade > 44));
 }
 
 // Effects
@@ -973,11 +1074,27 @@ function boom(x, wy, sc) {
   }
   shake = Math.max(shake, 4 * sc);
 }
+// Water impact: expanding rings plus a shower of droplets that arcs up and falls
+// back down. Shared by mine blasts, the boat crash and the dry-tank ditching.
+function splashAt(x, wy, sc) {
+  sc = sc || 1;
+  for (let i = 0; i < 3; i++) {
+    pushPart({ k: 'ring', color: 'water', x, wy, vx: 0, vy: 0, life: 20 + i * 8, max: 20 + i * 8, s: 8 + i * 7, g: 2.1 * sc });
+  }
+  const n = Math.round(11 * sc);
+  for (let i = 0; i < n; i++) {
+    const a = (Math.random() - 0.5) * 2.2;
+    pushPart({ k: 'spray', x, wy, vx: Math.sin(a) * (0.8 + Math.random() * 2.4) * sc,
+      vy: (1.5 + Math.random() * 2.8) * sc, life: 16 + Math.random() * 16, max: 32,
+      s: 1.3 + Math.random() * 1.7 });
+  }
+}
 function updateParts() {
   for (const p of parts) {
     p.x += p.vx; p.wy += p.vy; p.life--;
     if (p.k === 'fire' || p.k === 'smoke') { p.vx *= 0.95; p.vy *= 0.95; }
     if (p.k === 'smoke' || p.k === 'ring') p.s += p.g;
+    if (p.k === 'spray') p.vy -= 0.19;      // droplets arc up, then fall back
     if (p.k === 'debris') p.rot += p.vr;
   }
   parts = parts.filter(p => p.life > 0);
@@ -1020,6 +1137,7 @@ function newGame() {
   bridgesPassed = 0; checkpointCam = 0;
   cam = 0; sp = baseSpeed();
   ents = []; bullets = []; ebul = []; missiles = []; enemyRockets = []; parts = []; pods = []; pops = [];
+  weather = [];
   spawnedUpTo = 40; spawnBlock = 0;
   resetPlayerFx();
   ensureRows(60);
@@ -1034,6 +1152,7 @@ function respawn() {
   fuel = 100;
   cam = checkpointCam;
   ents = []; bullets = []; ebul = []; missiles = []; enemyRockets = []; pods = [];
+  weather = [];
   resetPlayerFx();
   const baseRow = Math.floor(cam / ROW);
   spawnedUpTo = baseRow + 1;
@@ -1053,22 +1172,43 @@ function sinkPlayer() {
   if (state !== 'play') return;
   state = 'sinking';
   deathTimer = SINK_DURATION;
+  sinkSplash = false;
   touch.fire = false; inp.fire = false; mouse.fire = false;
   refueling = false; refuelEnt = null;
   showBanner('OUT OF FUEL', isBoatMode() ? 'The patrol boat is going under' : 'Emergency water landing', SINK_DURATION);
-  for (let i = 0; i < 3; i++) pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 30 + i * 8, max: 38, s: 10 + i * 7, g: 1.25 });
+  splashAt(P.x, playerWy(), 0.85);
+  for (let i = 0; i < 2; i++) pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 36 + i * 10, max: 46, s: 12 + i * 9, g: 1.25 });
   sfx('splash');
 }
 function killPlayer() {
   if (state !== 'play') return;
   state = 'dying';
-  deathTimer = 100;
+  deathTimer = DEATH_DURATION;
   refueling = false; refuelEnt = null;
+  touch.fire = false; inp.fire = false; mouse.fire = false;
   buzz(220);
   boom(P.x, playerWy(), 2.2);
+  boom(P.x + (Math.random() - 0.5) * 28, playerWy() + 10, 1.2);
+  if (isBoatMode()) splashAt(P.x, playerWy(), 1.1);
   flash = 0.7;
   shake = 16;
   sfx('big');
+}
+// The wreck keeps burning after the first blast: a steady fire, a smoke column
+// and two delayed secondary explosions make the crash read as one event.
+function updateWreck() {
+  const sy = PLAYER_SY + 6;
+  if (t % 2 === 0) {
+    pushPart({ k: 'fire', x: P.x + (Math.random() - 0.5) * 28, wy: cam + (H - sy) + (Math.random() - 0.5) * 22,
+      vx: (Math.random() - 0.5) * 0.6, vy: 0.4 + Math.random() * 1.1, life: 16 + Math.random() * 14, max: 30,
+      s: 15 + Math.random() * 14 });
+  }
+  if (t % 3 === 0) smokeAt(P.x + (Math.random() - 0.5) * 30, cam + (H - sy), 1.6);
+  if (deathTimer === 86 || deathTimer === 64) {
+    boom(P.x + (Math.random() - 0.5) * 34, cam + (H - sy) + (Math.random() - 0.5) * 24, 0.85);
+    shake = Math.max(shake, 9);
+    sfx('boom');
+  }
 }
 // Absorb a hit with the dome: energy drops, the shell ripples, the craft survives.
 // Once the energy reaches zero the shield collapses and the next hit is lethal.
@@ -1095,7 +1235,7 @@ function hitPlayer(cost) {
   killPlayer();
 }
 
-const PTS = { boat: 150, gunboat: 220, heli: 250, jet: 300, turret: 180, launcher: 260, house: -150, fuel: 50, bridge: 1000 };
+const PTS = { boat: 150, gunboat: 220, heli: 250, jet: 300, turret: 180, launcher: 260, house: -150, fuel: 50, bridge: 1000, mine: 120 };
 function killEnt(e) {
   const sy = toScreenY(e.wy);
   const gain = addScore(PTS[e.kind] || 0, e.kind !== 'fuel' && e.kind !== 'house');
@@ -1105,6 +1245,17 @@ function killEnt(e) {
     for (let i = 0; i < 8; i++) boom(20 + i * 62, e.wy, 1.2);
     sfx('big');
     shake = 20;
+  } else if (e.kind === 'mine') {
+    e.removed = true;
+    boom(e.x, e.wy, 1.35);
+    splashAt(e.x, e.wy, 1.4);
+    shake = Math.max(shake, 8);
+    sfx('minehit');
+    // Sympathetic detonation: a shot mine sets off its neighbours.
+    for (const o of ents) {
+      if (o === e || o.removed || o.kind !== 'mine') continue;
+      if (Math.hypot(o.x - e.x, o.wy - e.wy) < 60) damage(o, 1);
+    }
   } else {
     e.removed = true;
     boom(e.x, e.wy, e.kind === 'fuel' ? 1.8 : 1.2);
@@ -1190,8 +1341,19 @@ function explodeRocket(m) {
 function launchRocket() {
   if (state !== 'play' || rockets <= 0) return false;
   rockets--;
-  missiles.push({ x: P.x, y: PLAYER_SY - 26, vx: 0, vy: -5, life: 150, trail: 0 });
-  sfx('shoot');
+  const wy = playerWy();
+  missiles.push({ x: P.x, y: PLAYER_SY - 34, vx: 0, vy: -5, life: 150, trail: 0, born: t, lockX: null, lockY: 0 });
+  // Launch signature: a rail flash, a puff of smoke and a small kick. Without this
+  // the rocket was invisible on a desktop screen where the sound is off.
+  flash = Math.max(flash, 0.1);
+  shake = Math.max(shake, 3.5);
+  for (let i = 0; i < 10; i++) {
+    const a = (Math.random() - 0.5) * 1.6;
+    pushPart({ k: 'fire', x: P.x + (Math.random() - 0.5) * 10, wy, vx: Math.sin(a) * (0.8 + Math.random() * 1.8),
+      vy: Math.cos(a) * (1 + Math.random() * 2) + 0.5, life: 12 + Math.random() * 10, max: 22, s: 9 + Math.random() * 8 });
+  }
+  for (let i = 0; i < 6; i++) smokeAt(P.x + (Math.random() - 0.5) * 18, wy, 1.1);
+  sfx('rocket');
   return true;
 }
 function updateEnemyRockets() {
@@ -1214,7 +1376,12 @@ function updateMissiles() {
     m.vx = lerp(m.vx, Math.cos(a) * 6.4, 0.12);
     m.vy = lerp(m.vy, Math.sin(a) * 6.4, 0.12);
     m.x += m.vx; m.y += m.vy; m.life--;
-    if (t % 2 === 0) pushPart({ k: 'smoke', x: m.x, wy: cam + (H - m.y), vx: 0, vy: 0, life: 14, max: 14, s: 2.3, g: 0.05 });
+    m.lockX = target ? target.x : null;
+    m.lockY = target ? ty : 0;
+    // A dense, clearly readable wake: smoke every frame plus a short flame tail.
+    const mwy = cam + (H - m.y);
+    pushPart({ k: 'smoke', x: m.x, wy: mwy, vx: 0, vy: 0, life: 18, max: 18, s: 3.2 + Math.random() * 1.6, g: 0.07 });
+    if (t % 2 === 0) pushPart({ k: 'fire', x: m.x, wy: mwy + 9, vx: 0, vy: 0, life: 8, max: 8, s: 13, g: 0 });
     if ((target && Math.hypot(target.x - m.x, toScreenY(target.wy) - m.y) < 22) || m.life <= 0 || m.y < -36) {
       m.dead = true; explodeRocket(m);
     }
@@ -1326,6 +1493,19 @@ function updatePlay() {
     const pb = playerBox();
     if (!overlap(P.x, PLAYER_SY, pb.w, pb.h, e.x, toScreenY(e.wy), e.w, e.h)) continue;
     if (e.kind === 'fuel') { refueling = true; refuelEnt = e; continue; }
+    if (e.kind === 'mine') {
+      // The jet flies over the minefield; the patrol boat detonates on contact.
+      if (!isBoatMode() || invuln > 0) continue;
+      e.removed = true;
+      boom(e.x, e.wy, 1.5);
+      splashAt(e.x, e.wy, 1.4);
+      shake = Math.max(shake, 15);
+      flash = Math.max(flash, 0.22);
+      sfx('minehit');
+      hitPlayer(SHIELD_MINE_COST);
+      if (state !== 'play') return;
+      continue;
+    }
     if (isBoatMode()) {
       if (e.kind === 'jet' || e.kind === 'heli') continue;       // aircraft fly above the river
     } else {
@@ -1335,8 +1515,30 @@ function updatePlay() {
     hitPlayer(SHIELD_CRASH_COST);
     if (state !== 'play') return;
   }
+
+  // Storm cells. Only the jet is in the cloud layer. Flying into the dark core
+  // starts a charge (flicker + rumble) that ends in a bolt after STORM_CHARGE
+  // frames; leaving the core in time cancels it, so the hazard is always fair.
+  if (!isBoatMode()) {
+    const pb = playerBox();
+    for (const w of weather) {
+      if (w.kind !== 'storm' || w.struck) continue;
+      const wsy = toScreenY(w.wy);
+      if (!overlap(P.x, PLAYER_SY, pb.w, pb.h, w.x, wsy, w.w * 0.72, w.h * 1.05)) { w.charge = 0; continue; }
+      if (w.charge <= 0) { w.charge = STORM_CHARGE; sfx('thunderwarn'); }
+      if (--w.charge > 0) continue;
+      w.charge = 0;
+      w.struck = true; w.fade = 0; w.bolt = 10; w.boltY = PLAYER_SY;
+      flash = Math.max(flash, 0.55);
+      shake = Math.max(shake, 14);
+      boom(P.x, playerWy(), 1.1);
+      sfx('thunder');
+      hitPlayer(SHIELD_STORM_COST);
+      if (state !== 'play') return;
+    }
+  }
   if (refueling) {
-    fuel = Math.min(100, fuel + 0.9);
+    fuel = Math.min(100, fuel + FUEL_RATE);
     if (t % 12 === 0) sfx('fuel');
     if (t % 3 === 0) {
       pushPart({ k: 'fuel', x: P.x + (Math.random() - 0.5) * 22, wy: pwy - 6 + (Math.random() - 0.5) * 14,
@@ -1393,8 +1595,23 @@ function update() {
   } else if (state === 'play') {
     updatePlay();
   } else if (state === 'dying' || state === 'sinking') {
-    if (state === 'sinking' && t % 9 === 0) {
-      pushPart({ k: 'bubble', x: P.x + (Math.random() - 0.5) * 18, wy: playerWy() + 12, vx: (Math.random() - 0.5) * 0.22, vy: 0.55 + Math.random() * 0.5, life: 34 + Math.random() * 18, max: 52, s: 1.5 + Math.random() * 2 });
+    if (state === 'dying') updateWreck();
+    if (state === 'sinking') {
+      const p = 1 - deathTimer / SINK_DURATION;
+      // The jet only touches the water a third of the way in: that is the splash.
+      if (!isBoatMode() && !sinkSplash && p >= 0.34) {
+        sinkSplash = true;
+        splashAt(P.x, playerWy(), 1.6);
+        flash = Math.max(flash, 0.16);
+        shake = Math.max(shake, 7);
+        sfx('splash');
+      }
+      if (t % 7 === 0) {
+        pushPart({ k: 'bubble', x: P.x + (Math.random() - 0.5) * 20, wy: playerWy() + 8 + Math.random() * 26, vx: (Math.random() - 0.5) * 0.22, vy: 0.5 + Math.random() * 0.6, life: 34 + Math.random() * 18, max: 52, s: 1.5 + Math.random() * 2 });
+      }
+      if (t % 16 === 0) {
+        pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 26, max: 26, s: 10 + Math.random() * 8, g: 1.5 });
+      }
     }
     if (--deathTimer <= 0) {
       lives--;
@@ -1597,6 +1814,39 @@ function drawGround() {
       glow(G_AMBER, e.x, sy - 43, 20, beacon ? 0.85 : 0.22);
       ctx.fillStyle = beacon ? '#fff2b8' : '#c98a20';
       ctx.beginPath(); ctx.arc(e.x, sy - 43, 2.6, 0, 7); ctx.fill();
+    } else if (e.kind === 'mine') {
+      // Anchored mine: dark contact sphere on eight spikes, a mooring ring on the
+      // water and a blinking lamp so it can never be mistaken for scenery.
+      const puls = 0.5 + 0.5 * Math.sin(t * 0.12 + e.ph);
+      const my = sy + Math.sin(t * 0.05 + e.ph) * 1.6;
+      const lamp = (t + e.ph * 20) % 70 < 26;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(190,240,255,' + (0.10 + 0.10 * puls) + ')'; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.ellipse(e.x, my + 6, 26 + puls * 4, 10 + puls * 2, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+      glow(G_RED, e.x, my - 1, 44 + puls * 10, 0.12 + 0.14 * puls);
+      ctx.save();
+      ctx.translate(e.x, my);
+      ctx.strokeStyle = '#8e9aa8'; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4 + Math.sin(t * 0.02 + e.ph) * 0.05;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        ctx.beginPath(); ctx.moveTo(ca * 8.5, sa * 8.5); ctx.lineTo(ca * 15.5, sa * 15.5); ctx.stroke();
+        ctx.fillStyle = '#b9c6d2';
+        ctx.beginPath(); ctx.arc(ca * 15.5, sa * 15.5, 1.6, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = rad(ctx, -3, -4, 1, 13, [[0, '#67737f'], [0.55, '#39424e'], [1, '#191f27']]);
+      ctx.beginPath(); ctx.arc(0, 0, 10.5, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(200,220,235,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = 'rgba(190,210,225,0.32)';
+      for (let i = 0; i < 6; i++) {
+        const a = i * Math.PI / 3;
+        ctx.beginPath(); ctx.arc(Math.cos(a) * 6.4, Math.sin(a) * 6.4, 1, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = lamp ? '#ff5a4a' : '#5d1a18';
+      ctx.beginPath(); ctx.arc(0, -1, 3, 0, 7); ctx.fill();
+      ctx.restore();
+      if (lamp) glow(G_RED, e.x, my - 1, 26, 0.7);
     } else if (e.kind === 'boat' || e.kind === 'gunboat') {
       const d = e.vx >= 0 ? 1 : -1, rot = d > 0 ? Math.PI / 2 : -Math.PI / 2;
       const enemyBoat = e.kind === 'gunboat' ? S_GUNBOAT : S_BOAT;
@@ -1687,23 +1937,84 @@ function drawPlayerJet(x, y, bank, boost, alpha) {
   ctx.restore();
 }
 
-function drawPlayer() {
-  if (state === 'dying' || state === 'over' || state === 'title') return;
-  if (state === 'sinking') {
-    const progress = 1 - deathTimer / SINK_DURATION;
-    const sy = PLAYER_SY + progress * 46;
-    ctx.save(); ctx.globalAlpha = 0.5 - progress * 0.25;
+// Wraps the submerged part of the craft in water: a clipped fill whose level rises
+// with the sequence. Reads as "the hull is going under" without extra sprites.
+function waterOverlay(x, y, rx, ry, k, alpha) {
+  if (k <= 0) return;
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.clip();
+  const top = y + ry * 0.95 - Math.min(1, k) * ry * 1.9;
+  ctx.fillStyle = 'rgba(9,52,84,' + (alpha === undefined ? 0.72 : alpha) + ')';
+  ctx.fillRect(x - rx, top, rx * 2, ry * 2.2);
+  ctx.strokeStyle = 'rgba(190,244,255,0.45)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x - rx, top); ctx.lineTo(x + rx, top); ctx.stroke();
+  ctx.restore();
+}
+
+// The crash: the craft tumbles, slides away and keeps burning instead of vanishing.
+function drawWreck() {
+  const p = 1 - deathTimer / DEATH_DURATION;
+  const boat = isBoatMode();
+  const wob = Math.sin(t * 0.24) * 3;
+  const y = PLAYER_SY + p * (boat ? 26 : 64);
+  const rot = boat ? p * 1.4 : p * 3.6;
+  const sc = 1 - p * (boat ? 0.2 : 0.28);
+  const a = 1 - p * 0.5;
+  // Backlight first, so the burnt hull stays readable against dark water.
+  glow(G_FIRE, P.x, y + 4, 132 + Math.sin(t * 0.3) * 14, (0.34 + 0.1 * Math.sin(t * 0.2)) * a);
+  if (boat) {
+    drawShadow(S_PLAYER_BOAT_CHAR, P.x + wob, y, rot, sc, 4);
+    drawSprite(S_PLAYER_BOAT_CHAR, P.x + wob, y, rot, sc, a);
+  } else {
+    drawShadow(S_PLAYER_CHAR, P.x + wob, y, rot, sc, 30);
+    drawSprite(S_PLAYER_CHAR, P.x + wob, y, rot, sc, a);
+  }
+  for (let i = 0; i < 3; i++) {
+    const ox = Math.sin(t * 0.3 + i * 2.1) * 12;
+    const oy = Math.cos(t * 0.26 + i * 1.7) * 11;
+    glow(G_FIRE, P.x + ox, y + oy, 30 + Math.sin(t * 0.4 + i) * 8, 0.5 * a);
+  }
+  glow(G_HOT, P.x, y - 4, 22, 0.45 * a);
+}
+
+// Running dry. The boat ships water, rolls over and slides under; the jet glides
+// down on a dead engine, ditches in a spray of water and floats hull-deep.
+function drawSinking() {
+  const p = 1 - deathTimer / SINK_DURATION;
+  const wob = Math.sin(t * 0.16) * 2.4;
+  if (isBoatMode()) {
+    const y = PLAYER_SY + p * 30;
+    const sc = 1 - p * 0.24;
+    ctx.save(); ctx.globalAlpha = 0.55 - p * 0.3;
     ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.ellipse(P.x, PLAYER_SY + 18, 20 + progress * 20, 5 + progress * 4, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(P.x, y + 6, 22 + p * 26, 6 + p * 4, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
-    if (isBoatMode()) {
-      drawShadow(S_PLAYER_BOAT, P.x, sy, 0.08 + progress * 0.16, 1 - progress * 0.2, 3);
-      drawSprite(S_PLAYER_BOAT, P.x, sy, 0.08 + progress * 0.16, 1 - progress * 0.2, 1 - progress * 0.75);
-    } else {
-      drawPlayerJet(P.x, sy, P.bank + progress * 0.25, 0, 1 - progress * 0.8);
-    }
+    drawShadow(S_PLAYER_BOAT, P.x + wob, y, P.bank * 0.06 + p * 0.55, sc, 3);
+    drawSprite(S_PLAYER_BOAT, P.x + wob, y, P.bank * 0.06 + p * 0.55, sc, 1 - p * 0.9);
+    waterOverlay(P.x + wob, y, 26 * sc, 46 * sc, p * 1.1);
     return;
   }
+  const ditch = 0.34;
+  const glide = Math.min(1, p / ditch);
+  const sub = Math.max(0, (p - ditch) / (1 - ditch));
+  const y = PLAYER_SY + glide * 24 + sub * 12;
+  if (p < ditch) {
+    drawPlayerJet(P.x, y, P.bank + glide * 0.55, 0.1, 1);
+  } else {
+    drawPlayerJet(P.x, y, P.bank + 1.2, 0, 1 - sub * 0.55);
+    waterOverlay(P.x, y, 24, 40, sub * 1.1, 0.5 + sub * 0.16);
+    ctx.save();
+    ctx.globalAlpha = 0.4 * (1 - sub);
+    ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(P.x, y + 10, 24 + sub * 26, 7 + sub * 4, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawPlayer() {
+  if (state === 'over' || state === 'title') return;
+  if (state === 'dying') { drawWreck(); return; }
+  if (state === 'sinking') { drawSinking(); return; }
   if (invuln > 0 && t % 8 >= 5) return;
   if (isBoatMode()) {
     const sway = Math.sin(t * 0.09) * 2;
@@ -1842,11 +2153,34 @@ function drawBullets() {
   }
   for (const m of missiles) {
     const a = Math.atan2(m.vy, m.vx) + Math.PI / 2;
-    ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(a);
-    glow(G_FIRE, 0, 8, 26, 0.8);
-    ctx.fillStyle = '#eaf8ff'; rr(-4, -14, 8, 24, 3); ctx.fill();
-    ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.moveTo(-4, -10); ctx.lineTo(0, -19); ctx.lineTo(4, -10); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e8561e'; ctx.beginPath(); ctx.moveTo(-4, 5); ctx.lineTo(-9, 12); ctx.lineTo(-4, 11); ctx.moveTo(4, 5); ctx.lineTo(9, 12); ctx.lineTo(4, 11); ctx.fill();
+    // Lock brackets around the tracked target, pulsing so they read as a lock.
+    if (m.lockX !== null && m.lockX !== undefined) {
+      const r = 20 + Math.sin(t * 0.3) * 2;
+      ctx.save();
+      ctx.globalAlpha = 0.5 + 0.35 * Math.sin(t * 0.35);
+      ctx.strokeStyle = '#8ff4ff'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      for (const sx of [-1, 1]) for (const sy2 of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(m.lockX + sx * r, m.lockY + sy2 * (r - 7));
+        ctx.lineTo(m.lockX + sx * r, m.lockY + sy2 * r);
+        ctx.lineTo(m.lockX + sx * (r - 7), m.lockY + sy2 * r);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Body, flickering exhaust and fins. The flame is what makes the shot obvious
+    // on a desktop screen where the sound may be muted.
+    const flame = 16 + Math.random() * 13;
+    ctx.save();
+    ctx.translate(m.x, m.y); ctx.rotate(a);
+    glow(G_FIRE, 0, 12, 48, 0.85);
+    ctx.fillStyle = lin(ctx, 0, 6, 0, flame, [[0, 'rgba(255,255,255,0.95)'], [0.35, 'rgba(255,196,92,0.9)'], [1, 'rgba(255,70,20,0)']]);
+    ctx.beginPath(); ctx.moveTo(-4.5, 6); ctx.lineTo(0, flame); ctx.lineTo(4.5, 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,150,50,0.9)'; ctx.fillRect(-8.5, 2, 3, 9); ctx.fillRect(5.5, 2, 3, 9);
+    ctx.fillStyle = '#f2fbff'; rr(-5, -16, 10, 24, 4); ctx.fill();
+    ctx.strokeStyle = 'rgba(150,220,255,0.55)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#ff8a2b'; ctx.beginPath(); ctx.moveTo(-5, -11); ctx.lineTo(0, -23); ctx.lineTo(5, -11); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffe0a4'; ctx.beginPath(); ctx.moveTo(-2.2, -11); ctx.lineTo(0, -17.5); ctx.lineTo(2.2, -11); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
   for (const b of bullets) {
@@ -1881,6 +2215,9 @@ function drawParts() {
     } else if (p.k === 'bubble') {
       ctx.strokeStyle = 'rgba(205,246,255,' + (k * 0.7) + ')'; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(p.x, sy, p.s, 0, Math.PI * 2); ctx.stroke();
+    } else if (p.k === 'spray') {
+      ctx.fillStyle = 'rgba(216,246,255,' + (k * 0.85) + ')';
+      ctx.beginPath(); ctx.arc(p.x, sy, p.s, 0, 7); ctx.fill();
     } else if (p.k === 'debris') {
       ctx.save(); ctx.translate(p.x, sy); ctx.rotate(p.rot);
       ctx.fillStyle = 'rgba(30,34,40,' + Math.min(1, k * 1.6) + ')';
@@ -1891,6 +2228,79 @@ function drawParts() {
       ctx.lineWidth = 2 + k * 3;
       ctx.beginPath(); ctx.arc(p.x, sy, p.s, 0, 7); ctx.stroke();
     }
+  }
+}
+
+// Weather layer, drawn above the craft. Translucent clouds are pure scenery; a dark
+// cell flickers while it charges, then drops a bolt on whatever is underneath.
+// A bolt from the belly of the cell down to the impact point: three strokes (halo,
+// body, hot core), a fork and a bright splash of light where it lands.
+function drawBolt(x, y0, y1) {
+  const seed = Math.floor(t / 4);
+  const len = Math.max(60, y1 - y0);
+  const steps = 6;
+  const pts = [[x, y0]];
+  let px = x, py = y0;
+  for (let i = 1; i <= steps; i++) {
+    const lastOne = i === steps;
+    px += lastOne ? (x - px) : (hash(seed + i * 17, i * 7) - 0.5) * 42;
+    py += len / steps;
+    pts.push([px, py]);
+  }
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const strokes = [[20, 'rgba(110,190,255,0.35)'], [9, 'rgba(170,225,255,0.5)'], [3.4, '#ffffff']];
+  for (const st of strokes) {
+    ctx.globalCompositeOperation = st[0] === 20 ? 'lighter' : 'source-over';
+    ctx.strokeStyle = st[1];
+    ctx.lineWidth = st[0];
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+  }
+  for (const f of [pts[2], pts[4]]) {
+    ctx.strokeStyle = 'rgba(235,250,255,0.8)'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(f[0], f[1]);
+    ctx.lineTo(f[0] + 14, f[1] + 20);
+    ctx.lineTo(f[0] + 8, f[1] + 38);
+    ctx.stroke();
+  }
+  ctx.restore();
+  glow(G_CYAN, x, y1, 96, 0.85);
+  glow(G_HOT, x, y1, 44, 0.9);
+}
+function drawWeather() {
+  for (const w of weather) {
+    const sy = toScreenY(w.wy);
+    if (sy < -180 || sy > H + 180) continue;
+    const drift = Math.sin(t * 0.012 + w.ph) * 4;
+    if (w.kind === 'cloud') {
+      ctx.save();
+      ctx.globalAlpha = 0.36 + 0.07 * Math.sin(t * 0.02 + w.ph);
+      ctx.drawImage(S_CLOUD_SOFT.c, w.x - w.w / 2 + drift, sy - w.h / 2, w.w, w.h);
+      ctx.restore();
+      continue;
+    }
+    const fade = w.struck ? Math.max(0, 1 - w.fade / 44) : 1;
+    if (fade <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.drawImage(S_CLOUD_STORM.c, w.x - w.w / 2 + drift, sy - w.h / 2, w.w, w.h);
+    ctx.restore();
+    if (w.charge > 0) {
+      // Charge warning: the belly of the cloud lights up and flickers.
+      const flick = 0.35 + 0.65 * (Math.sin(t * 1.5) > 0 ? 1 : 0.15);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = (0.3 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.55))) * flick * fade;
+      ctx.fillStyle = 'rgba(200,230,255,1)';
+      ctx.beginPath(); ctx.ellipse(w.x + drift, sy + 12, w.w * 0.34, w.h * 0.2, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    if (w.bolt > 0) drawBolt(w.x + drift, sy + 14, w.boltY || sy + 130);
   }
 }
 
@@ -2079,7 +2489,7 @@ function drawTitle() {
   drawPlayerJet(W / 2, 470 + Math.sin(t * 0.04) * 6, Math.sin(t * 0.03) * 0.5, 0.6);
   txt('BEST ' + String(hi).padStart(7, '0'), W / 2, 330, '600 16px "Saira Condensed", sans-serif', 'rgba(232,238,246,0.7)', 'center');
   if (blink) txt('PRESS ENTER OR TAP TO START', W / 2, 586, '700 22px "Saira Condensed", sans-serif', '#ffffff', 'center', 'rgba(255,255,255,0.35)');
-  txt('Protect homes (-150); dodge straight rockets; destroy turrets (+180)', W / 2, 622, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
+  txt('Protect homes (-150); dodge rockets; mines sink boats, storms fry jets', W / 2, 622, '400 13px "Saira", sans-serif', 'rgba(232,238,246,0.7)', 'center');
   txt('Shields raise on pickup, drain with every hit and fade with time', W / 2, 644, '400 12px "Saira", sans-serif', 'rgba(150,255,208,0.7)', 'center');
   txt('Touch: drag + FIRE button   Keys: arrows, Space fire, V rocket, P pause', W / 2, 666, '400 12px "Saira", sans-serif', 'rgba(232,238,246,0.55)', 'center');
   ctx.restore();
@@ -2095,10 +2505,24 @@ function render() {
   drawRefuelHose();
   drawBullets();
   drawParts();
+  drawWeather();
   drawClouds();
   ctx.setTransform(SC, 0, 0, SC, 0, 0);
   ctx.drawImage(S_VIGNETTE.c, 0, 0, W, H);
-  if (flash > 0.02) { ctx.fillStyle = 'rgba(255,240,220,' + flash * 0.7 + ')'; ctx.fillRect(0, 0, W, H); }
+  // Hit flash: a hot core on the craft that fades out across the screen instead of
+  // a flat white veil that used to wash the whole frame out.
+  if (flash > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = rad(ctx, P.x, PLAYER_SY, 0, Math.max(W, H) * 0.95, [
+      [0, 'rgba(255,236,196,' + Math.min(0.95, flash * 0.9) + ')'],
+      [0.28, 'rgba(255,150,70,' + flash * 0.34 + ')'],
+      [0.65, 'rgba(255,110,40,' + flash * 0.1 + ')'],
+      [1, 'rgba(255,90,20,0)']
+    ]);
+    ctx.fillRect(-20, -20, W + 40, H + 40);
+    ctx.restore();
+  }
   if (state === 'title') { drawTitle(); return; }
   drawHud();
   drawPointers();
@@ -2133,7 +2557,7 @@ function togglePause() {
   else if (state === 'paused') state = pausedFrom;
 }
 window.addEventListener('keydown', e => {
-  audio();
+  audio(); keepAwake();
   const k = KEYMAP[e.code];
   if (k) { inp[k] = true; if (k !== 'fire') mouse.on = false; e.preventDefault(); }
   if (e.repeat) return;
@@ -2147,7 +2571,10 @@ window.addEventListener('keyup', e => {
   if (k) { inp[k] = false; e.preventDefault(); }
 });
 window.addEventListener('blur', () => { for (const k in inp) inp[k] = false; touch.active = false; touch.fire = false; touch.pointerId = null; touch.firePointerId = null; mouse.fire = false; });
-document.addEventListener('visibilitychange', () => { if (document.hidden && state === 'play') togglePause(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (state === 'play') togglePause(); }
+  else keepAwake();
+});
 
 function toLogical(e) {
   const r = cv.getBoundingClientRect();
@@ -2155,7 +2582,7 @@ function toLogical(e) {
 }
 cv.addEventListener('contextmenu', e => e.preventDefault());
 cv.addEventListener('pointerdown', e => {
-  audio();
+  audio(); keepAwake();
   cv.focus();
   const p = toLogical(e);
   if (state === 'paused') { togglePause(); return; }
@@ -2165,6 +2592,7 @@ cv.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse') {
     mouse.on = true; mouse.inside = true; mouse.x = p.x; mouse.y = p.y;
     if (e.button === 0) mouse.fire = true;
+    else if (e.button === 2) launchRocket();
     return;
   }
   touchUsed = true;
@@ -2239,6 +2667,19 @@ if (document.fonts && document.fonts.load) {
   document.fonts.load('500 15px "Saira"');
 }
 requestAnimationFrame(frame);
+
+// Android/Chrome: a long run should not be interrupted by the screen sleeping.
+// The request needs a user gesture, so every input retries it until it sticks.
+let wakeLock = null;
+function keepAwake() {
+  try {
+    if (wakeLock || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+    navigator.wakeLock.request('screen').then(function (lock) {
+      wakeLock = lock;
+      lock.addEventListener('release', function () { wakeLock = null; });
+    }).catch(function () {});
+  } catch (e) {}
+}
 
 })();
 </script>

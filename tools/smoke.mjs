@@ -44,6 +44,14 @@ window.__rb = {
   get cam() { return cam; },
   set cam(v) { cam = v; },
   get ents() { return ents; },
+  get weather() { return weather; },
+  get missiles() { return missiles; },
+  get rockets() { return rockets; },
+  set rockets(v) { rockets = v; },
+  get fuelEvery() { return FUEL_EVERY; },
+  get sinkSplash() { return sinkSplash; },
+  get deathTimer() { return deathTimer; },
+  launchRocket,
   get P() { return P; },
   get score() { return score; },
   newGame, respawn, raiseShield, hitPlayer, update, spawnRow,
@@ -318,6 +326,115 @@ for (const mode of ['desktop', 'touch']) {
       return sy > -80 && sy < H - 300;
     });
     assert.equal(near.length, 0, `found ${near.length} enemies close to the respawn point`);
+  });
+
+  check(`[${mode}] fuel barges stay rare`, () => {
+    assert.ok(api.fuelEvery >= 380, `barges every ${api.fuelEvery} rows is too generous`);
+  });
+
+  check(`[${mode}] the map generator places minefields`, () => {
+    api.newGame();
+    api.checkpointCam = 30000;
+    api.respawn();
+    step(120);
+    assert.ok(api.ents.some(e => e.kind === 'mine'), 'no mines were generated upstream');
+  });
+
+  check(`[${mode}] boat detonates on a mine`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;           // river patrol
+    api.shieldEnergy = 0;
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'dying');
+  });
+
+  check(`[${mode}] a mine nearly collapses the shield`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;
+    api.raiseShield();
+    api.shieldEnergy = 60;
+    api.shieldHitCd = 0;
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'play', 'the dome absorbs the blast');
+    assert.ok(api.shieldEnergy <= 10, `shield left at ${api.shieldEnergy}`);
+  });
+
+  check(`[${mode}] jet flies over the minefield`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;           // air patrol
+    api.ents.length = 0;
+    api.ents.push({ kind: 'mine', x: api.P.x, wy: api.playerWy(), w: 30, h: 30, hp: 1, flash: 0, ph: 0 });
+    step(1);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] storm cell charges before it strikes`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;
+    api.shieldEnergy = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'storm', x: api.P.x, wy: api.playerWy(), w: 186, h: 104, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(1);
+    assert.ok(api.weather[0].charge > 0, 'the cell must telegraph the strike');
+    assert.equal(api.state, 'play', 'the flicker itself is harmless');
+    step(30);
+    assert.equal(api.state, 'dying');
+  });
+
+  check(`[${mode}] harmless clouds never hurt the jet`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'cloud', x: api.P.x, wy: api.playerWy(), w: 158, h: 86, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(60);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] boat ignores storm cells`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.bridgesPassed = 1;
+    api.shieldEnergy = 0;
+    api.weather.length = 0;
+    api.weather.push({ kind: 'storm', x: api.P.x, wy: api.playerWy(), w: 186, h: 104, drift: 0, ph: 0,
+      charge: 0, struck: false, fade: 0, bolt: 0 });
+    step(60);
+    assert.equal(api.state, 'play');
+  });
+
+  check(`[${mode}] rocket launch is visible and locks onto a target`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.ents.length = 0;
+    api.rockets = 2;
+    api.ents.push({ kind: 'boat', x: api.P.x + 40, wy: api.playerWy() + 320, w: 84, h: 30, hp: 3, flash: 0, vx: 0, cd: 9999 });
+    assert.equal(api.launchRocket(), true);
+    assert.equal(api.missiles.length, 1);
+    step(4);
+    assert.equal(api.missiles.length, 1, 'the missile should still be flying');
+    assert.notEqual(api.missiles[0].lockX, null, 'the missile should lock onto the boat');
+  });
+
+  check(`[${mode}] running dry sinks the craft and respawns`, () => {
+    api.newGame();
+    api.invuln = 0;
+    api.fuel = 0.01;
+    step(1);
+    assert.equal(api.state, 'sinking');
+    step(160);
+    assert.notEqual(api.state, 'sinking');
+    assert.ok(['play', 'over'].includes(api.state));
   });
 
   check(`[${mode}] long run with restarts stays stable`, () => {
