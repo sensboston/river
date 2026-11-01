@@ -68,17 +68,30 @@ sheds) -> **DESERT** (sand, cacti, dry rocks) -> back to the jungle.
 * Keyboard: arrows or `WASD`, `Space` to fire, `V` rocket, `P` pause, `M` sound.
 * Touch: drag to steer (drag up/down for faster/slower), hold **FIRE**, tap **ROCKET**.
 
-Shields are automatic: a shield pod raises the dome at once, and the dome drains
+Shields are automatic: a rescued survivor can raise the dome at once, and the dome drains
 with time and with every hit it absorbs. When the meter is empty the next hit hurts.
 The dome is a full bubble around the craft and absorbs hits from any direction, so
 it also covers the tail. The craft sits 190 px above the bottom edge, clear of the
 holding thumb on a phone.
 
+## Survivors
+
+The river is enemy ground and the people are what it costs. Every so often a kill
+brings somebody out of cover, and picking them up is a rescue:
+
+* from the air they stand in the shallows at the water's edge and wave;
+* from the boat they swim in an orange life ring, bobbing on the water, waving;
+* there is no badge and no letter: the help they give is part of the surprise
+  (spread shot, rapid fire, shield, rocket or a nova blast), and a rescue scores
+  200 points and counts for the `RESCUE SURVIVORS` mission;
+* the pickup is generous - a 36 px radius plus a gentle pull from 72 px - because
+  a person is small and the river is busy.
+
 ## Progression
 
 The river is a chain of sectors, not an endless scroller:
 
-* every sector has **one mission** (destroy targets, sweep mines, collect pods) with
+* every sector has **one mission** (destroy targets, sweep mines, rescue survivors) with
   a live counter in the HUD and a score bonus;
 * the sector ends at the bridge, which opens a **report + upgrade draft** screen:
   three of six upgrades (fire rate, fuel burn, rockets, shield, life, score);
@@ -132,7 +145,7 @@ storm cells, the rocket lock, the out-of-fuel sequence, sector missions, the
 upgrade draft, star persistence, the initials/hi-score flow, difficulty scaling,
 the tutorial sector, the second wind, the daily seed and course, the salvage on
 death, the score tally, the landscape theme table and a render pass in all four
-themes (78 checks).
+themes, the survivor drop and a rescue (82 checks).
 
 ## Deployment
 

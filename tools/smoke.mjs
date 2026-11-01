@@ -60,6 +60,8 @@ window.__rb = {
   get shieldEnergy() { return shieldEnergy; },
   get cam() { return cam; },
   get livesLost() { return livesLost; },
+  get survivors() { return survivors; },
+  spawnSurvivor, rescueSurvivor,
   totalStars, chooseUpgrade, finishDistrict, killEnt, startMission, missionTick,
   get score() { return score; },
   set score(v) { score = v; },
@@ -270,7 +272,7 @@ for (const mode of ['desktop', 'touch']) {
     api.shieldEnergy = 0;
     api.raiseShield();
     const after = api.shieldEnergy;
-    assert.ok(after > 0, 'shield energy should rise when a pod is collected');
+    assert.ok(after > 0, 'shield energy should rise when a shield is raised');
     step(30);
     assert.ok(api.shieldEnergy < after, 'shield should bleed energy over time');
     const beforeHit = api.shieldEnergy;
@@ -481,7 +483,7 @@ for (const mode of ['desktop', 'touch']) {
 
   check(`[${mode}] every district opens with a mission`, () => {
     api.newGame();
-    assert.ok(['sweep', 'pods', 'mine'].includes(api.mission.id), 'no mission was assigned');
+    assert.ok(['sweep', 'rescue', 'mine'].includes(api.mission.id), 'no mission was assigned');
     assert.ok(api.mission.goal >= 2, 'the mission goal is too small');
     assert.equal(api.mission.done, 0);
     assert.equal(api.mission.complete, false);
@@ -501,18 +503,47 @@ for (const mode of ['desktop', 'touch']) {
     assert.equal(api.mission.complete, true);
   });
 
-  check(`[${mode}] a pod mission is reachable without luck`, () => {
+  check(`[${mode}] a rescue mission is reachable without luck`, () => {
     api.newGame();
-    api.startMission(3);            // sector 3 is the pod mission
-    assert.equal(api.mission.id, 'pods');
+    api.startMission(3);            // sector 3 is the rescue mission
+    assert.equal(api.mission.id, 'rescue');
     api.ents.length = 0;
     for (let i = 0; i < 6 && !api.mission.complete; i++) {
       const e = { kind: 'boat', x: 120 + i * 12, wy: api.playerWy() + 400, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
       api.ents.push(e);
       api.killEnt(e);
-      if (i === 2) step(1);         // let the pod fall and the player reach it
     }
-    assert.ok(api.mission.kills >= 2, 'kills should be counted for the pod mission');
+    assert.ok(api.mission.kills >= 2, 'kills should be counted for the rescue mission');
+    assert.ok(api.survivors.length >= 2, 'every second kill should bring somebody out');
+  });
+
+  check(`[${mode}] survivors stand on the shore in the air and swim in the river`, () => {
+    api.newGame();
+    api.ents.length = 0;
+    api.bridgesPassed = 0;                       // air patrol
+    const e = { kind: 'boat', x: 240, wy: api.playerWy() + 300, w: 84, h: 30, hp: 1, flash: 0, vx: 0, cd: 9999 };
+    api.spawnSurvivor(e);
+    const a = api.survivors[api.survivors.length - 1];
+    assert.equal(a.water, false, 'from the air you rescue people on the bank');
+    api.bridgesPassed = 1;                       // river patrol
+    api.spawnSurvivor(e);
+    const b = api.survivors[api.survivors.length - 1];
+    assert.equal(b.water, true, 'from the boat you rescue swimmers in life rings');
+    api.survivors.length = 0;
+  });
+
+  check(`[${mode}] swimming up to a survivor rescues them and scores`, () => {
+    api.newGame();
+    api.invuln = 999;
+    api.survivors.length = 0;
+    api.score = 0;
+    api.startMission(3);                         // rescue mission, goal >= 2
+    api.survivors.push({ x: api.P.x, wy: api.playerWy(), water: true, born: 0, kind: 'shield', v: 0 });
+    step(1);
+    assert.equal(api.survivors.length, 0, 'the survivor is picked up');
+    assert.ok(api.score >= 100, `a rescue should score (got ${api.score})`);
+    assert.equal(api.mission.done, 1, 'a rescue counts for the mission');
+    assert.ok(api.shieldEnergy > 0, 'the rescue grants its help');
   });
 
   check(`[${mode}] clearing a district awards stars and opens the draft`, () => {
