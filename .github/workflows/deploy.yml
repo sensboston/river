@@ -2,7 +2,7 @@ name: Deploy HTML Game to GitHub Pages
 
 on:
   push:
-    branches: ["main"]
+    branches: ["master"]
   # Allows manually triggering the deployment from the Actions tab
   workflow_dispatch:
 
