@@ -35,14 +35,28 @@ jobs:
       # - name: Build static assets
       #   run: npm run build
 
+      # The service worker is cache-first, so the cache name has to change on
+      # every deploy or returning players keep the old build. tools/build.mjs
+      # writes dist/ and stamps sw.js with the commit id.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the site
+        run: |
+          node tools/check.mjs
+          node tools/smoke.mjs
+          node tools/build.mjs
+
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
-          # Path to directory containing index.html (use '.' for repository root or './dist' for build output)
-          path: '.'
+          # Only the deployable site: docs, tools and CI never reach Pages.
+          path: './dist'
 
   # Deployment job
   deploy:
