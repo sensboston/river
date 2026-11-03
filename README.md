@@ -106,20 +106,23 @@ The river is a chain of sectors, not an endless scroller:
 The draft screen is deliberately the only place a full-screen ad could go: it is a
 natural pause between missions, never mid-run.
 
-## Hazards
+## Hazards and enemies
 
-* **Fuel barges**: one every 180 rows (1440 px) against roughly 6000 px of range,
+* **Fuel barges**: one every 220 rows (1760 px) against roughly 6500 px of range,
   so refuelling feels natural and missing a barge is never an instant game-over.
   A single swift pass with the hose down fills the tank, and barges have enough
   durability to withstand stray friendly fire.
 * **Mines** are anchored in the river. The patrol boat detonates on contact, the
   jet flies over them. They also detonate when shot, and the blast sets off the
   neighbouring mines.
+* **Kamikaze drones** hunt the player's aircraft from above, actively tracking
+  horizontal position to ram into the craft.
 * **Clouds** are harmless scenery. **Storm cells** are dark and deadly: flying into
   the core starts a charge, the cell flickers for a fifth of a second and then
   drops a lightning bolt. Leave the core in time and the strike fizzles.
-* Losing all fuel is a sequence, not an instant: the boat ships water and rolls
-  under, the jet glides down, ditches and floats hull-deep before it sinks.
+* Losing all fuel is a realistic sequence: the boat's diesel engine coughs, drifts and
+  takes on water, while the jet suffers a flameout, performs a deadstick glide, skips
+  and ditches with spray onto the water before sinking.
 * A destroyed craft breaks up: staged explosions, a burning wreck and a smoke
   column, then the respawn.
 
