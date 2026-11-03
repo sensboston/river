@@ -136,18 +136,18 @@ const MAX_ROCKETS = 5;
 // The shield is an energy pool, not a stored charge: it raises itself the moment
 // a shield pod is picked up, bleeds away with time and loses energy on every hit.
 const SHIELD_MAX = 100;
-const SHIELD_PICKUP = 55;      // energy added by one shield pod
-const SHIELD_DRAIN = 0.22;     // energy lost per frame while the dome is up (~7.5 s full)
-const SHIELD_BULLET_COST = 16; // enemy bullet absorbed by the dome
-const SHIELD_ROCKET_COST = 28; // enemy rocket absorbed by the dome
-const SHIELD_CRASH_COST = 32;  // ramming an enemy or a bank
-const SHIELD_MINE_COST = 55;   // a mine is far more violent than a scrape
-const SHIELD_STORM_COST = 60;  // a lightning strike
+const SHIELD_PICKUP = 65;      // energy added by one shield pod (was 55)
+const SHIELD_DRAIN = 0.16;     // energy lost per frame while the dome is up (~10.4 s full, was 0.22)
+const SHIELD_BULLET_COST = 14; // enemy bullet absorbed by the dome (was 16)
+const SHIELD_ROCKET_COST = 24; // enemy rocket absorbed by the dome (was 28)
+const SHIELD_CRASH_COST = 28;  // ramming an enemy or a bank (was 32)
+const SHIELD_MINE_COST = 50;   // a mine is far more violent than a scrape (was 55)
+const SHIELD_STORM_COST = 55;  // a lightning strike (was 60)
 const SINK_DURATION = 150;     // two and a half seconds
 const DEATH_DURATION = 112;    // staged explosion of the wreck before the respawn
-const FUEL_EVERY = 180;       // one barge every 1440 px: frequent enough to keep the tank healthy
+const FUEL_EVERY = 220;       // one barge every 1760 px (~12-14 s): balanced pacing
 const FUEL_RATE = 5.0;        // refuel per frame of contact: one swift pass fills the tank
-const FUEL_BURN = 0.040;      // base fuel consumed per frame (~41 s per full tank)
+const FUEL_BURN = 0.038;      // base fuel consumed per frame (~44 s per full tank)
 // Hazards. Spacing values are rows; the offset keeps them off the fuel rows and
 // the bridge approaches.
 const MINE_EVERY = 64;        // anchored mine field spacing (river sectors)
@@ -324,6 +324,27 @@ const S_ENEMYJET = sprite(52, 62, g => {
   g.beginPath(); g.ellipse(26, 20, 2.6, 6.5, 0, 0, Math.PI * 2); g.fill();
 });
 
+// Kamikaze attack drone: small, nimble quad-wing craft that homes in on the player
+const S_DRONE = sprite(36, 36, g => {
+  // Rotors / arms (X shape)
+  g.strokeStyle = '#222933'; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(6, 6); g.lineTo(30, 30); g.moveTo(30, 6); g.lineTo(6, 30); g.stroke();
+  // Rotor guard rings
+  g.strokeStyle = '#4e5a6b'; g.lineWidth = 1.4;
+  for (const [rx, ry] of [[7, 7], [29, 7], [7, 29], [29, 29]]) {
+    g.beginPath(); g.arc(rx, ry, 5.5, 0, Math.PI * 2); g.stroke();
+    g.fillStyle = 'rgba(120,210,255,0.45)'; g.beginPath(); g.arc(rx, ry, 2.5, 0, Math.PI * 2); g.fill();
+  }
+  // Central pod (armoured sphere + glowing red eye / sensor)
+  g.fillStyle = lin(g, 10, 10, 26, 26, [[0, '#4b5563'], [0.45, '#1f2937'], [1, '#111827']]);
+  g.beginPath(); g.arc(18, 18, 8.5, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#ff4d4d'; g.lineWidth = 1.2;
+  g.beginPath(); g.arc(18, 18, 8.5, 0, Math.PI * 2); g.stroke();
+  // Red seeker eye
+  g.fillStyle = '#ff2222'; g.beginPath(); g.arc(18, 18, 3.8, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#ffffff'; g.beginPath(); g.arc(17, 17, 1.2, 0, Math.PI * 2); g.fill();
+});
+
 // Attack helicopter without rotors (nose up, rotors are drawn live)
 const S_HELI = sprite(50, 84, g => {
   g.strokeStyle = '#161a16'; g.lineWidth = 2;
@@ -395,27 +416,6 @@ const S_PLAYER_BOAT = sprite(52, 92, g => {
   g.fillStyle = '#fff'; g.beginPath(); g.arc(26, 20, 3, 0, Math.PI * 2); g.fill();
 });
 
-function makeHouse(v) {
-  const palettes = [
-    { wall: '#d7c39b', roof: '#8c3f32', trim: '#5b463b' },
-    { wall: '#e2d7bd', roof: '#455d72', trim: '#50493f' },
-    { wall: '#c9d1b2', roof: '#76553a', trim: '#463c31' }
-  ];
-  const p = palettes[v % palettes.length];
-  return sprite(68, 54, g => {
-    g.fillStyle = 'rgba(5,18,24,.32)'; g.beginPath(); g.ellipse(34, 47, 31, 6, 0, 0, Math.PI * 2); g.fill();
-    g.fillStyle = p.trim; g.fillRect(13, 21, 42, 27);
-    g.fillStyle = p.wall; g.fillRect(16, 23, 36, 22);
-    g.fillStyle = p.roof; g.beginPath(); g.moveTo(8, 24); g.lineTo(34, 5 + (v % 2) * 2); g.lineTo(60, 24); g.closePath(); g.fill();
-    g.strokeStyle = 'rgba(255,235,190,.55)'; g.lineWidth = 1.5; g.stroke();
-    g.fillStyle = '#293c45'; g.fillRect(22, 29, 8, 8); g.fillRect(39, 29, 8, 8);
-    g.fillStyle = '#f5d68a'; g.fillRect(24, 31, 4, 4); g.fillRect(41, 31, 4, 4);
-    g.fillStyle = p.trim; g.fillRect(32, 34, 8, 11);
-    g.fillStyle = '#b9ab8e'; g.fillRect(47, 9, 5, 10);
-    g.fillStyle = 'rgba(255,240,194,.8)'; g.fillRect(11, 46, 46, 2);
-  });
-}
-const S_HOUSES = [makeHouse(0), makeHouse(1), makeHouse(2)];
 const S_TURRET = sprite(50, 40, g => {
   g.fillStyle = 'rgba(5,12,16,.32)'; g.beginPath(); g.ellipse(25, 34, 24, 5, 0, 0, Math.PI * 2); g.fill();
   g.fillStyle = '#343b40'; rrIn(g, 4, 11, 42, 25, 8); g.fill();
@@ -1427,44 +1427,6 @@ function engineUpdate() {
   eng.mode = boat;
 }
 
-// Find a bank position for each house that stays inland, within the viewport,
-// and clear of the deterministic trees painted on nearby rows.
-function findHouseSite(r, row) {
-  ensureRows(r + 7);
-  const artW = 50, artH = 40, minD = 42;
-  const preferred = hash(r, 41) < 0.5 ? -1 : 1;
-  let best = null, bestScore = -Infinity, bestOverlaps = Infinity;
-  for (const side of [preferred, -preferred]) {
-    const bankW = side < 0 ? row.l : W - row.r;
-    const maxD = Math.floor(bankW - artW / 2 - 5);
-    if (maxD < minD) continue;
-    for (let d = minD; d <= maxD; d += 4) {
-      const x = side < 0 ? row.l - d : row.r + d;
-      let overlaps = 0, nearest = Infinity;
-      for (let q = Math.max(0, r - 6); q <= r + 6; q++) {
-        if (hash(q, 11) >= 0.28) continue;
-        const treeSide = hash(q, 12) < 0.5 ? -1 : 1;
-        if (treeSide !== side) continue;
-        const tr = rows[q];
-        const treeBank = side < 0 ? tr.l : W - tr.r;
-        if (treeBank < 50) continue;
-        const td = 26 + hash(q, 13) * (treeBank - 52);
-        const tx = side < 0 ? tr.l - td : tr.r + td;
-        const treeSize = 26 + hash(q, 15) * 18;
-        const dx = Math.abs(x - tx), dy = Math.abs((r - q) * ROW);
-        const clearX = (artW + treeSize) / 2 + 5;
-        const clearY = (artH + treeSize) / 2 + 5;
-        if (dx < clearX && dy < clearY) overlaps++;
-        nearest = Math.min(nearest, Math.max(0, dx - clearX) + Math.max(0, dy - clearY));
-      }
-      const score = -overlaps * 10000 + nearest;
-      if (score > bestScore) { bestScore = score; bestOverlaps = overlaps; best = { x, side }; }
-      if (overlaps === 0 && nearest > 0) return { x, side };
-    }
-  }
-  return bestOverlaps === 0 ? best : null;
-}
-
 // Spawning
 function spawnRow(r) {
   ensureRows(r + 2);
@@ -1480,10 +1442,6 @@ function spawnRow(r) {
   if (r % FUEL_EVERY === FUEL_EVERY / 2) {
     ents.push({ kind: 'fuel', x: (row.l + row.r) / 2 + (hash(r, 4) - 0.5) * (rw - 90), wy, w: 46, h: 96, hp: 6, flash: 0 });
     return;
-  }
-  if (r % 64 === 24) {
-    const site = findHouseSite(r, row);
-    if (site) ents.push({ kind: 'house', x: site.x, wy, w: 84, h: 44, hp: 2, flash: 0, side: site.side, img: S_HOUSES[Math.floor(hash(r, 42) * S_HOUSES.length)] });
   }
   if (r > 120 && r % 148 === 62) {
     const side = hash(r, 43) < 0.5 ? -1 : 1;
@@ -1525,15 +1483,18 @@ function spawnRow(r) {
   const density = Math.min(0.82, 0.46 + sec * 0.045) * diff().enemyK * (sec === 0 ? 0.72 : 1);
   if (hash(r, 1) > density) return;
   const k = hash(r, 2), dir = hash(r, 6) < 0.5 ? -1 : 1;
-  if (k < 0.27) {
+  if (k < 0.24) {
     ents.push({ kind: 'boat', x, wy, w: 84, h: 30, hp: 3, flash: 0, vx: dir * (0.6 + sec * 0.05), cd: 60 + hash(r, 7) * 80 });
-  } else if (k < 0.48 && r > 100) {
+  } else if (k < 0.42 && r > 100) {
     ents.push({ kind: 'gunboat', x, wy, w: 76, h: 34, hp: 3, flash: 0, vx: dir * (0.8 + sec * 0.05), cd: 90 + hash(r, 7) * 50 });
-  } else if (k < 0.70) {
+  } else if (k < 0.60) {
     ents.push({ kind: 'heli', x, wy, w: 44, h: 46, hp: 2, flash: 0, vx: dir * (0.9 + sec * 0.06), cd: 70 + hash(r, 7) * 80 });
-  } else if (k < 0.83 && r > 260) {
+  } else if (k < 0.74 && r > 120) {
+    // Attack drone: fast, seeks the player craft to ram it
+    ents.push({ kind: 'drone', x, wy, w: 32, h: 32, hp: 1, flash: 0, vx: dir * 0.6, vy: 1.8 + sec * 0.1 });
+  } else if (k < 0.85 && r > 260) {
     ents.push({ kind: 'jet', x: 40 + hash(r, 9) * (W - 80), wy, w: 34, h: 44, hp: 1, flash: 0, active: false, t: 0 });
-  } else if (k < 0.91 && rw >= 250) {
+  } else if (k < 0.92 && rw >= 250) {
     const iw = Math.min(46 + hash(r, 4) * 80, rw - 140);
     const ih = 64 + hash(r, 5) * 60;
     const img = makeIsland(r, iw, ih, themeForRow(r));
@@ -1580,6 +1541,14 @@ function stepWorld(live) {
       if (live && sy > 30 && sy < PLAYER_SY - 120 && --e.cd <= 0) {
         e.cd = (Math.max(55, 120 - sec * 6) + Math.random() * 50) * diff().fireK;
         aimShot(e.x, sy + 14, 4.0 + sec * 0.1);
+      }
+    } else if (e.kind === 'drone') {
+      // Kamikaze drone: actively steers towards player X and dives downstream
+      e.wy -= e.vy || 2.0;
+      const dx = P.x - e.x;
+      e.x += clamp(dx * 0.045, -2.4, 2.4);
+      if (t % 4 === 0) {
+        pushPart({ k: 'spark', x: e.x, wy: e.wy + 10, vx: (Math.random() - 0.5) * 0.4, vy: 0.6, life: 6, max: 8, s: 1.5 });
       }
     } else if (e.kind === 'jet') {
       if (!e.active) { if (live && sy >= -20) { e.active = true; e.t = 0; } }
@@ -1774,10 +1743,13 @@ function sinkPlayer() {
   sinkSplash = false;
   touch.fire = false; inp.fire = false; mouse.fire = false;
   refueling = false; refuelEnt = null;
-  showBanner('OUT OF FUEL', isBoatMode() ? 'The patrol boat is going under' : 'Emergency water landing', SINK_DURATION);
-  splashAt(P.x, playerWy(), 0.85);
-  for (let i = 0; i < 2; i++) pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 36 + i * 10, max: 46, s: 12 + i * 9, g: 1.25 });
-  sfx('splash');
+  showBanner('OUT OF FUEL', isBoatMode() ? 'Engine stalled · Drifting under' : 'Flameout · Deadstick emergency glide', SINK_DURATION);
+  if (isBoatMode()) {
+    splashAt(P.x, playerWy(), 0.85);
+    sfx('splash');
+  } else {
+    sfx('low');
+  }
 }
 function killPlayer() {
   if (state !== 'play') return;
@@ -1834,12 +1806,12 @@ function hitPlayer(cost) {
   killPlayer();
 }
 
-const PTS = { boat: 150, gunboat: 220, heli: 250, jet: 300, turret: 180, launcher: 260, house: -150, fuel: 50, bridge: 1000, mine: 120 };
+const PTS = { boat: 150, gunboat: 220, heli: 250, drone: 200, jet: 300, turret: 180, launcher: 260, fuel: 50, bridge: 1000, mine: 120 };
 function killEnt(e) {
   if (e.kind === 'mine') missionTick('mine');
-  else if (e.kind !== 'fuel' && e.kind !== 'house' && e.kind !== 'bridge') missionTick('sweep');
+  else if (e.kind !== 'fuel' && e.kind !== 'bridge') missionTick('sweep');
   const sy = toScreenY(e.wy);
-  const gain = addScore(PTS[e.kind] || 0, e.kind !== 'fuel' && e.kind !== 'house');
+  const gain = addScore(PTS[e.kind] || 0, e.kind !== 'fuel');
   addPopup(e.x, sy, (gain < 0 ? '' : '+') + gain, gain < 0 ? '#ff7272' : '#ffd37a');
   if (e.kind === 'bridge') {
     e.dead = true;
@@ -1864,8 +1836,8 @@ function killEnt(e) {
     // A "rescue survivors" mission must not depend on luck: while it is active
     // every second kill brings somebody out of cover.
     mission.kills = (mission.kills || 0) + 1;
-    const forceRescue = mission.id === 'rescue' && !mission.complete && mission.kills % 2 === 0;
-    if (e.kind !== 'fuel' && e.kind !== 'house' && (forceRescue || Math.random() < 0.25)) {
+    const forceRescue = mission.id === 'rescue' && !mission.complete && mission.kills % 3 === 0;
+    if (e.kind !== 'fuel' && (forceRescue || Math.random() < 0.16)) {
       spawnSurvivor(e);
     }
   }
@@ -1900,8 +1872,9 @@ function spawnSurvivor(e) {
     // swimming in a life ring, well inside the channel so the boat can reach them
     x = row.l + 48 + Math.random() * Math.max(24, (row.r - row.l) - 96);
   } else {
-    // standing in the shallows at the water's edge, waving
-    x = hash(e.wy | 0, 91) < 0.5 ? row.l + 15 : row.r - 15;
+    // standing on the bank shore, outside the water channel
+    const side = hash(e.wy | 0, 91) < 0.5 ? -1 : 1;
+    x = side < 0 ? Math.max(14, row.l - 12 - Math.random() * 16) : Math.min(W - 14, row.r + 12 + Math.random() * 16);
   }
   survivors.push({
     x, wy: e.wy, water, born: t,
@@ -1943,7 +1916,7 @@ function rocketTarget(m) {
   let best = null, bestD = Infinity;
   for (const e of ents) {
     if (e.removed || e.kind === 'fuel' || e.kind === 'island' || (e.kind === 'bridge' && e.dead)) continue;
-    if (!['boat', 'gunboat', 'heli', 'jet', 'turret', 'launcher', 'bridge'].includes(e.kind)) continue;
+    if (!['boat', 'gunboat', 'heli', 'drone', 'jet', 'turret', 'launcher', 'bridge'].includes(e.kind)) continue;
     const sy = toScreenY(e.wy);
     if (sy < -30 || sy > H + 30 || sy > m.y + 12) continue;
     const d = Math.hypot(e.x - m.x, sy - m.y);
@@ -2133,10 +2106,10 @@ function updatePlay() {
       continue;
     }
     if (isBoatMode()) {
-      if (e.kind === 'jet' || e.kind === 'heli') continue;       // aircraft fly above the river
+      if (e.kind === 'jet' || e.kind === 'heli' || e.kind === 'drone') continue;       // aircraft fly above the river
     } else {
       if (e.kind === 'boat' || e.kind === 'gunboat') continue;   // boats are below the flight path
-      if (e.kind === 'island' || e.kind === 'house' || e.kind === 'turret' || e.kind === 'launcher') continue;
+      if (e.kind === 'island' || e.kind === 'turret' || e.kind === 'launcher') continue;
     }
     hitPlayer(SHIELD_CRASH_COST);
     if (state !== 'play') return;
@@ -2227,19 +2200,40 @@ function update() {
     if (state === 'dying') updateWreck();
     if (state === 'sinking') {
       const p = 1 - deathTimer / SINK_DURATION;
-      // The jet only touches the water a third of the way in: that is the splash.
-      if (!isBoatMode() && !sinkSplash && p >= 0.34) {
-        sinkSplash = true;
-        splashAt(P.x, playerWy(), 1.6);
-        flash = Math.max(flash, 0.16);
-        shake = Math.max(shake, 7);
-        sfx('splash');
-      }
-      if (t % 7 === 0) {
-        pushPart({ k: 'bubble', x: P.x + (Math.random() - 0.5) * 20, wy: playerWy() + 8 + Math.random() * 26, vx: (Math.random() - 0.5) * 0.22, vy: 0.5 + Math.random() * 0.6, life: 34 + Math.random() * 18, max: 52, s: 1.5 + Math.random() * 2 });
-      }
-      if (t % 16 === 0) {
-        pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 26, max: 26, s: 10 + Math.random() * 8, g: 1.5 });
+      const boat = isBoatMode();
+      if (!boat) {
+        // Air flameout: jet glides unpowered, leaves thin engine stutter smoke, then belly ditches into water
+        if (p < 0.45) {
+          if (t % 4 === 0) smokeAt(P.x + (Math.random() - 0.5) * 6, playerWy() - 14, 0.7);
+        } else if (!sinkSplash) {
+          sinkSplash = true;
+          splashAt(P.x, playerWy(), 2.1);
+          flash = Math.max(flash, 0.22);
+          shake = Math.max(shake, 11);
+          sfx('splash');
+        } else {
+          // Hydroplaning and sinking: bow spray wake, expanding water rings and bubbles
+          if (t % 3 === 0) {
+            pushPart({ k: 'spray', x: P.x + (Math.random() - 0.5) * 22, wy: playerWy() - 4, vx: (Math.random() - 0.5) * 1.8, vy: 1.2 + Math.random() * 1.2, life: 18, max: 22, s: 2.2 });
+          }
+          if (t % 6 === 0) {
+            pushPart({ k: 'bubble', x: P.x + (Math.random() - 0.5) * 20, wy: playerWy() + 6 + Math.random() * 20, vx: (Math.random() - 0.5) * 0.22, vy: 0.5 + Math.random() * 0.6, life: 34 + Math.random() * 18, max: 52, s: 1.8 + Math.random() * 2 });
+          }
+          if (t % 14 === 0) {
+            pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 28, max: 28, s: 14 + Math.random() * 8, g: 1.6 });
+          }
+        }
+      } else {
+        // Boat stalled: diesel engine puffs black exhaust, then takes on water and lists
+        if (p < 0.35 && t % 5 === 0) {
+          smokeAt(P.x + (Math.random() - 0.5) * 8, playerWy() + 12, 0.9);
+        }
+        if (t % 7 === 0) {
+          pushPart({ k: 'bubble', x: P.x + (Math.random() - 0.5) * 20, wy: playerWy() + 8 + Math.random() * 26, vx: (Math.random() - 0.5) * 0.22, vy: 0.5 + Math.random() * 0.6, life: 34 + Math.random() * 18, max: 52, s: 1.5 + Math.random() * 2 });
+        }
+        if (t % 16 === 0) {
+          pushPart({ k: 'ring', color: 'water', x: P.x, wy: playerWy(), vx: 0, vy: 0, life: 26, max: 26, s: 10 + Math.random() * 8, g: 1.5 });
+        }
       }
     }
     if (--deathTimer <= 0) {
@@ -2456,10 +2450,6 @@ function drawGround() {
     if (sy < -120 || sy > H + 120) continue;
     if (e.kind === 'island') {
       drawSprite(e.img, e.x, sy, 0, 1);
-    } else if (e.kind === 'house') {
-      drawShadow(e.img, e.x, sy, 0, 0.74, 3);
-      drawSprite(e.img, e.x, sy, 0, 0.74);
-      drawFlash(e.img, e.x, sy, 0, e, 0.74);
     } else if (e.kind === 'turret') {
       const a = Math.atan2(PLAYER_SY - sy, P.x - e.x);
       if (e.charge > 0) {
@@ -2608,7 +2598,12 @@ function drawAir() {
     const sy = toScreenY(e.wy);
     if (sy < -120 || sy > H + 120) continue;
     if (e.kind === 'heli') drawHeli(e, sy);
-    else if (e.kind === 'jet') {
+    else if (e.kind === 'drone') {
+      glow(G_RED, e.x, sy, 28, 0.6 + 0.3 * Math.sin(t * 0.3));
+      drawShadow(S_DRONE, e.x, sy, t * 0.15, 1, 22);
+      drawSprite(S_DRONE, e.x, sy, t * 0.15, 1);
+      drawFlash(S_DRONE, e.x, sy, t * 0.15, e);
+    } else if (e.kind === 'jet') {
       if (e.active) glow(G_RED, e.x, sy - 30, 36, 0.8);
       drawShadow(S_ENEMYJET, e.x, sy, Math.PI, 1, 30);
       drawSprite(S_ENEMYJET, e.x, sy, Math.PI, 1);
@@ -2617,19 +2612,21 @@ function drawAir() {
   }
 }
 
-function drawPlayerJet(x, y, bank, boost, alpha) {
-  drawShadow(S_PLAYER, x, y, bank * 0.18, 1, 30);
-  const len = 12 + boost * 18 + Math.random() * 5;
-  ctx.save();
-  ctx.translate(x, y + 30);
-  ctx.fillStyle = lin(ctx, 0, 0, 0, len, [[0, 'rgba(255,255,255,0.95)'], [0.3, 'rgba(255,190,90,0.85)'], [1, 'rgba(255,90,20,0)']]);
-  ctx.beginPath(); ctx.moveTo(-3.4, 0); ctx.lineTo(0, len); ctx.lineTo(3.4, 0); ctx.closePath(); ctx.fill();
-  ctx.restore();
-  glow(G_FIRE, x, y + 36, 38 + boost * 14, 0.7);
+function drawPlayerJet(x, y, bank, boost, alpha, scale = 1) {
+  drawShadow(S_PLAYER, x, y, bank * 0.18, scale, 30);
+  if (boost > 0) {
+    const len = (12 + boost * 18 + Math.random() * 5) * scale;
+    ctx.save();
+    ctx.translate(x, y + 30 * scale);
+    ctx.fillStyle = lin(ctx, 0, 0, 0, len, [[0, 'rgba(255,255,255,0.95)'], [0.3, 'rgba(255,190,90,0.85)'], [1, 'rgba(255,90,20,0)']]);
+    ctx.beginPath(); ctx.moveTo(-3.4 * scale, 0); ctx.lineTo(0, len); ctx.lineTo(3.4 * scale, 0); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    glow(G_FIRE, x, y + 36 * scale, (38 + boost * 14) * scale, 0.7);
+  }
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(bank * 0.18);
-  ctx.scale(1 - Math.abs(bank) * 0.12, 1);
+  ctx.scale((1 - Math.abs(bank) * 0.12) * scale, scale);
   if (alpha !== undefined) ctx.globalAlpha = alpha;
   ctx.drawImage(S_PLAYER.c, -32, -36, 64, 72);
   ctx.restore();
@@ -2675,36 +2672,46 @@ function drawWreck() {
   glow(G_HOT, P.x, y - 4, 22, 0.45 * a);
 }
 
-// Running dry. The boat ships water, rolls over and slides under; the jet glides
-// down on a dead engine, ditches in a spray of water and floats hull-deep.
+// Running dry. Realistic flameout / engine stall:
+// The boat engine coughs, drifts along the current, ships water and slowly rolls over;
+// The jet suffers a flameout, loses altitude while deadstick gliding, stalls, skips and belly-ditches
+// with spray before settling and submerging.
 function drawSinking() {
   const p = 1 - deathTimer / SINK_DURATION;
-  const wob = Math.sin(t * 0.16) * 2.4;
+  const wob = Math.sin(t * 0.14) * (2.2 + p * 3.5);
   if (isBoatMode()) {
-    const y = PLAYER_SY + p * 30;
-    const sc = 1 - p * 0.24;
-    ctx.save(); ctx.globalAlpha = 0.55 - p * 0.3;
-    ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.ellipse(P.x, y + 6, 22 + p * 26, 6 + p * 4, 0, 0, Math.PI * 2); ctx.stroke();
+    const y = PLAYER_SY + p * 24;
+    const sc = 1 - p * 0.22;
+    const roll = P.bank * 0.06 + Math.sin(p * Math.PI) * 0.35 + p * 0.55;
+    ctx.save(); ctx.globalAlpha = Math.max(0, 0.55 - p * 0.4);
+    ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.ellipse(P.x + wob * 0.5, y + 6, 20 + p * 24, 6 + p * 4, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
-    drawShadow(S_PLAYER_BOAT, P.x + wob, y, P.bank * 0.06 + p * 0.55, sc, 3);
-    drawSprite(S_PLAYER_BOAT, P.x + wob, y, P.bank * 0.06 + p * 0.55, sc, 1 - p * 0.9);
-    waterOverlay(P.x + wob, y, 26 * sc, 46 * sc, p * 1.1);
+    drawShadow(S_PLAYER_BOAT, P.x + wob, y, roll, sc, 3);
+    drawSprite(S_PLAYER_BOAT, P.x + wob, y, roll, sc, Math.max(0, 1 - p * 0.85));
+    waterOverlay(P.x + wob, y, 26 * sc, 46 * sc, p * 1.15, 0.6 + p * 0.2);
     return;
   }
-  const ditch = 0.34;
-  const glide = Math.min(1, p / ditch);
-  const sub = Math.max(0, (p - ditch) / (1 - ditch));
-  const y = PLAYER_SY + glide * 24 + sub * 12;
+  const ditch = 0.45; // first 45% is the unpowered glide / descent
   if (p < ditch) {
-    drawPlayerJet(P.x, y, P.bank + glide * 0.55, 0.1, 1);
+    const glide = p / ditch;
+    // Loss of thrust, slight wing wobble, nose down
+    const wingWob = Math.sin(t * 0.18) * 0.08 * (1 - glide);
+    const y = PLAYER_SY + glide * 32;
+    const sc = 1 - glide * 0.08;
+    drawPlayerJet(P.x + wingWob * 20, y, P.bank * (1 - glide) + wingWob, 0, 1, sc);
   } else {
-    drawPlayerJet(P.x, y, P.bank + 1.2, 0, 1 - sub * 0.55);
-    waterOverlay(P.x, y, 24, 40, sub * 1.1, 0.5 + sub * 0.16);
+    const sub = (p - ditch) / (1 - ditch);
+    // Skidding on water surface, decelerating and sinking hull-deep
+    const skidY = PLAYER_SY + 32 + sub * 20;
+    const sc = 0.92 - sub * 0.18;
+    const pitch = 0.15 + sub * 0.4;
+    drawPlayerJet(P.x + wob * 0.6, skidY, pitch, 0, Math.max(0, 1 - sub * 0.6), sc);
+    waterOverlay(P.x + wob * 0.6, skidY, 26 * sc, 42 * sc, sub * 1.25, 0.55 + sub * 0.22);
     ctx.save();
-    ctx.globalAlpha = 0.4 * (1 - sub);
-    ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.ellipse(P.x, y + 10, 24 + sub * 26, 7 + sub * 4, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = Math.max(0, 0.5 * (1 - sub));
+    ctx.strokeStyle = '#c8f5ff'; ctx.lineWidth = 2.2;
+    ctx.beginPath(); ctx.ellipse(P.x + wob * 0.6, skidY + 8, 22 + sub * 28, 7 + sub * 5, 0, 0, Math.PI * 2); ctx.stroke();
     ctx.restore();
   }
 }
