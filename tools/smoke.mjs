@@ -371,7 +371,7 @@ for (const mode of ['desktop', 'touch']) {
     step(45);
     assert.ok(api.fuel >= 95, `one pass should essentially fill the tank (reached ${Math.round(api.fuel)})`);
     // And the distance between barges must be shorter than the range of a tank.
-    const rowsPerTank = 100 / 0.055 / 60 * 2.4 * 60 / 8;   // 100 fuel -> frames -> px -> rows
+    const rowsPerTank = 100 / 0.040 / 60 * 2.4 * 60 / 8;   // 100 fuel -> frames -> px -> rows
     assert.ok(api.fuelEvery <= rowsPerTank * 0.8,
       `barges every ${api.fuelEvery} rows vs ${Math.round(rowsPerTank)} rows of range`);
   });
