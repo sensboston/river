@@ -108,9 +108,10 @@ natural pause between missions, never mid-run.
 
 ## Hazards
 
-* **Fuel barges**: one every 300 rows (2400 px) against roughly 4400 px of range,
-  so the tank has to be managed but a missed barge is not a death sentence. A
-  single pass with the hose down fills the tank.
+* **Fuel barges**: one every 180 rows (1440 px) against roughly 6000 px of range,
+  so refuelling feels natural and missing a barge is never an instant game-over.
+  A single swift pass with the hose down fills the tank, and barges have enough
+  durability to withstand stray friendly fire.
 * **Mines** are anchored in the river. The patrol boat detonates on contact, the
   jet flies over them. They also detonate when shot, and the blast sets off the
   neighbouring mines.

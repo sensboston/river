@@ -145,8 +145,9 @@ const SHIELD_MINE_COST = 55;   // a mine is far more violent than a scrape
 const SHIELD_STORM_COST = 60;  // a lightning strike
 const SINK_DURATION = 150;     // two and a half seconds
 const DEATH_DURATION = 112;    // staged explosion of the wreck before the respawn
-const FUEL_EVERY = 300;       // one barge every 2400 px: missing two in a row runs the tank dry
-const FUEL_RATE = 4.2;        // refuel per frame of contact: one pass fills the tank
+const FUEL_EVERY = 180;       // one barge every 1440 px: frequent enough to keep the tank healthy
+const FUEL_RATE = 5.0;        // refuel per frame of contact: one swift pass fills the tank
+const FUEL_BURN = 0.040;      // base fuel consumed per frame (~41 s per full tank)
 // Hazards. Spacing values are rows; the offset keeps them off the fuel rows and
 // the bridge approaches.
 const MINE_EVERY = 64;        // anchored mine field spacing (river sectors)
@@ -1477,7 +1478,7 @@ function spawnRow(r) {
   const wy = r * ROW + ROW / 2;
   const x = row.l + 40 + hash(r, 3) * (rw - 80);
   if (r % FUEL_EVERY === FUEL_EVERY / 2) {
-    ents.push({ kind: 'fuel', x: (row.l + row.r) / 2 + (hash(r, 4) - 0.5) * (rw - 90), wy, w: 46, h: 96, hp: 2, flash: 0 });
+    ents.push({ kind: 'fuel', x: (row.l + row.r) / 2 + (hash(r, 4) - 0.5) * (rw - 90), wy, w: 46, h: 96, hp: 6, flash: 0 });
     return;
   }
   if (r % 64 === 24) {
@@ -2062,7 +2063,7 @@ function updatePlay() {
   if (comboT > 0 && --comboT === 0) combo = 0;
 
   // Fuel
-  fuel -= 0.055 * fuelBurnK() * diff().fuelK;
+  fuel -= FUEL_BURN * fuelBurnK() * diff().fuelK;
   if (fuel < 25 && --lowBeep <= 0) { sfx('low'); lowBeep = 30; }
   if (fuel <= 0) { fuel = 0; sinkPlayer(); return; }
 
@@ -2114,7 +2115,9 @@ function updatePlay() {
   for (const e of ents) {
     if (e.removed || (e.kind === 'bridge' && e.dead)) continue;
     const pb = playerBox();
-    if (!overlap(P.x, PLAYER_SY, pb.w, pb.h, e.x, toScreenY(e.wy), e.w, e.h)) continue;
+    const refuelW = e.kind === 'fuel' ? e.w + 16 : pb.w;
+    const refuelH = e.kind === 'fuel' ? e.h + 20 : pb.h;
+    if (!overlap(P.x, PLAYER_SY, refuelW, refuelH, e.x, toScreenY(e.wy), e.w, e.h)) continue;
     if (e.kind === 'fuel') { refueling = true; refuelEnt = e; continue; }
     if (e.kind === 'mine') {
       // The jet flies over the minefield; the patrol boat detonates on contact.
