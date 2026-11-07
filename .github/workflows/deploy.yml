@@ -27,7 +27,7 @@ jobs:
 
       # Optional build steps for bundled projects (e.g., Vite, Webpack, npm scripts):
       # - name: Setup Node.js
-      #   uses: actions/setup-node@v4
+      #   uses: actions/setup-node@v7
       #   with:
       #     node-version: '22'
       # - name: Install dependencies
@@ -39,7 +39,7 @@ jobs:
       # every deploy or returning players keep the old build. tools/build.mjs
       # writes dist/ and stamps sw.js with the commit id.
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
